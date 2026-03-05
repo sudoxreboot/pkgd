@@ -4,6 +4,10 @@ pull and install unifier
 
 ---
 
+<p align="center">
+  <img src="images/screenshot-pkgd-gui.png" alt="screenshot" width="720"/>
+</p>
+
 # goals
 
 package manager for simplicity
