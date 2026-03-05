@@ -1,16 +1,28 @@
-#sudoxget
-pull and install on ubuntu with zsh
+# pkgd
 
----
-simply adds a --
-
-well, i got that far and decided to change it from a zsh addition to making a full on package machine...
-tech is a slippery slope
+pull and install unifier
 
 ---
 
-#goals
+# goals
+
 package manager for simplicity
-simple command to parse what distro youre on, and to auto pull (latest or specific version), install (latest or specific version), update, or uninstall
+
+simple command to install with url or repo
+
+parse distro youre on
+
+pull (latest or specific version) (i.e. pkgd raspberrypi/rpi-imager)
+
+install (latest or specific version) (i.e. pkgd -i raspberrypi/rpi-imager)
+
+update
+
+uninstall
+
 starting with github, adding gitlab and other funtionality as i go
+
+unified and uniform
+
+- after goal: try to make it determine based on package name (i.e. pkgd -i balenaEtcher)
 
