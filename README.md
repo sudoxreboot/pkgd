@@ -67,14 +67,6 @@ pkgd is a shell command + gui app that installs software from github releases, p
 
 ---
 
-## install pkgd
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sudoxreboot/pkgd/main/install.sh | bash
-```
-
----
-
 ## testers wanted — coming soon
 
 we're building something different. pkgd is going live with a gamified beta.
