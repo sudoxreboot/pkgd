@@ -1,0 +1,3 @@
+#!/bin/bash
+# pkgd pre-remove script — clean up sudoers drop-in
+rm -f /etc/sudoers.d/pkgd

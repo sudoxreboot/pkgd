@@ -1,0 +1,21 @@
+#!/bin/bash
+# pkgd post-install script
+# Write a sudoers drop-in so pkgd can manage packages without a password dialog
+
+SUDOERS_FILE=/etc/sudoers.d/pkgd
+
+cat > "$SUDOERS_FILE" << 'EOF'
+# pkgd — allow passwordless package management
+# This file is managed by pkgd and will be removed on uninstall.
+ALL ALL=(root) NOPASSWD: /usr/bin/apt-get install -y *
+ALL ALL=(root) NOPASSWD: /usr/bin/apt-get remove -y *
+ALL ALL=(root) NOPASSWD: /usr/bin/snap install *
+ALL ALL=(root) NOPASSWD: /usr/bin/snap remove *
+ALL ALL=(root) NOPASSWD: /usr/bin/dnf install -y *
+ALL ALL=(root) NOPASSWD: /usr/bin/dnf remove -y *
+ALL ALL=(root) NOPASSWD: /usr/bin/pacman -S --noconfirm *
+ALL ALL=(root) NOPASSWD: /usr/bin/pacman -R --noconfirm *
+EOF
+
+chmod 440 "$SUDOERS_FILE"
+chown root:root "$SUDOERS_FILE"

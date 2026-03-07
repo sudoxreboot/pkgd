@@ -1,0 +1,1081 @@
+#!/usr/bin/env bash
+# pkgd — universal release installer
+# https://github.com/sudoxreboot/pkgd
+set -euo pipefail
+
+PKGD_VERSION="0.1.0"
+PKGD_DIR="${PKGD_DIR:-$HOME/.pkgd}"
+PKGD_DB="${PKGD_DIR}/installed.json"
+PKGD_APPS="${HOME}/applications"
+
+# runtime globals (set by helpers)
+RELEASE_DATE=""
+INSTALLED_PKGNAME=""
+
+# ─── colors ───────────────────────────────────────────────────────────────────
+teal="\033[38;2;136;255;238m"
+lilac="\033[38;2;170;170;255m"
+red="\033[0;31m"
+yellow="\033[0;33m"
+dim="\033[2m"
+rst="\033[0m"
+
+info()    { printf "${teal}:: ${rst}%s\n" "$*"; }
+warn()    { printf "${yellow}!! ${rst}%s\n" "$*"; }
+err()     { printf "${red}!! ERROR: ${rst}%s\n" "$*" >&2; }
+dimline() { printf "${dim}   %s${rst}\n" "$*"; }
+section() { printf "\n${lilac}── %s ──${rst}\n" "$*"; }
+done_ok() { printf "${teal}:: done: ${rst}%s\n" "$*"; }
+
+# ─── privilege escalation ─────────────────────────────────────────────────────
+# use pkexec (graphical auth dialog) when there's no TTY, so GUI installs work
+_sudo() {
+  if [ -t 0 ] || sudo -n true 2>/dev/null; then
+    sudo "$@"
+  elif command -v pkexec &>/dev/null; then
+    pkexec "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+# grep that never returns non-zero — safe under set -e
+_grep() { grep "$@" || true; }
+
+# ─── detect os / distro / arch ────────────────────────────────────────────────
+detect_os() {
+  OS="linux"
+  ARCH=$(uname -m)
+  DISTRO="unknown"
+  PKG_PRIORITY=("appimage" "tar" "zip" "bin")
+
+  case "$ARCH" in
+    x86_64)  ARCH_TAG="x86_64"; ARCH_ALT="amd64" ;;
+    aarch64) ARCH_TAG="aarch64"; ARCH_ALT="arm64" ;;
+    armv7l)  ARCH_TAG="armv7l"; ARCH_ALT="armhf" ;;
+    *)       ARCH_TAG="$ARCH"; ARCH_ALT="$ARCH" ;;
+  esac
+
+  if [[ "$(uname)" == "Darwin" ]]; then
+    OS="macos"
+    DISTRO="macos"
+    PKG_PRIORITY=("dmg" "zip" "tar" "bin")
+    return
+  fi
+
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    DISTRO="${ID:-unknown}"
+  fi
+
+  case "$DISTRO" in
+    debian|ubuntu|kubuntu|linuxmint|pop|neon|elementary|kali|raspbian)
+      PKG_PRIORITY=("deb" "appimage" "tar" "zip" "bin") ;;
+    fedora|rhel|centos|rocky|alma|opensuse*|sles)
+      PKG_PRIORITY=("rpm" "appimage" "tar" "zip" "bin") ;;
+    arch|manjaro|endeavouros|garuda|artix)
+      PKG_PRIORITY=("appimage" "tar" "zip" "bin") ;;
+    *)
+      PKG_PRIORITY=("appimage" "tar" "zip" "bin") ;;
+  esac
+}
+
+# ─── parse arguments ──────────────────────────────────────────────────────────
+usage() {
+  cat <<EOF
+${teal}pkgd${rst} ${dim}v${PKGD_VERSION}${rst} — universal release installer
+
+${lilac}usage:${rst}
+  pkgd [options] <repo|url|name>
+  pkgd update [repo]
+  pkgd list
+  pkgd remove <repo>
+
+${lilac}options:${rst}
+  -i             install after download
+  --deb          force .deb
+  --rpm          force .rpm
+  --appimage     force .AppImage
+  --tar          force .tar.gz/.tar.xz
+  --zip          force .zip
+  --bin          force raw binary
+  --version <v>  install specific version (default: latest)
+  --list         list all release assets without downloading
+  -h, --help     show this help
+
+${lilac}examples:${rst}
+  pkgd lazydocker                        # search by name
+  pkgd balena-io/etcher
+  pkgd -i raspberrypi/rpi-imager
+  pkgd -i --appimage jesseduffield/lazydocker
+  pkgd -i https://github.com/cli/cli
+  pkgd --list jesseduffield/lazydocker
+  pkgd update
+  pkgd list
+  pkgd remove cli/cli
+EOF
+}
+
+parse_args() {
+  INSTALL=false
+  FORCE_TYPE=""
+  LIST_ONLY=false
+  INPUT=""
+  PIN_VERSION=""
+  SEARCH_QUERY=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -i)             INSTALL=true ;;
+      --deb)          FORCE_TYPE="deb" ;;
+      --rpm)          FORCE_TYPE="rpm" ;;
+      --appimage)     FORCE_TYPE="appimage" ;;
+      --tar)          FORCE_TYPE="tar" ;;
+      --zip)          FORCE_TYPE="zip" ;;
+      --bin)          FORCE_TYPE="bin" ;;
+      --list)         LIST_ONLY=true ;;
+      --version)      shift; PIN_VERSION="$1" ;;
+      -h|--help)      usage; exit 0 ;;
+      --version-info) printf "pkgd %s\n" "$PKGD_VERSION"; exit 0 ;;
+      update)         CMD="update"; shift; UPDATE_TARGET="${1:-}"; return ;;
+      list)           CMD="list"; return ;;
+      remove)         CMD="remove"; shift; INPUT="$1"; return ;;
+      launch)         CMD="launch"; shift; INPUT="$1"; return ;;
+      -*)             warn "unknown option: $1" ;;
+      *)              INPUT="$1" ;;
+    esac
+    shift
+  done
+
+  # plain name (no slash, no URL) → name search
+  if [[ -n "$INPUT" && "$INPUT" != */* && "$INPUT" != *://* ]]; then
+    CMD="search"
+    SEARCH_QUERY="$INPUT"
+  else
+    CMD="install"
+  fi
+}
+
+# ─── resolve source → repo + host ─────────────────────────────────────────────
+resolve_source() {
+  local input="$1"
+  SOURCE_TYPE="github"
+  REPO=""
+  DIRECT_URL=""
+
+  if [[ "$input" == https://github.com/*/releases/download/* ]]; then
+    # GitHub release asset URL — extract owner/repo and use as direct download
+    REPO=$(printf '%s' "$input" | sed 's|https://github.com/||' | cut -d'/' -f1-2)
+    DIRECT_URL="$input"
+    SOURCE_TYPE="direct"
+  elif [[ "$input" == https://github.com/* ]]; then
+    REPO=$(echo "$input" | sed 's|https://github.com/||' | cut -d'/' -f1-2)
+    SOURCE_TYPE="github"
+  elif [[ "$input" == https://gitlab.com/* ]]; then
+    REPO=$(echo "$input" | sed 's|https://gitlab.com/||' | cut -d'/' -f1-2)
+    SOURCE_TYPE="gitlab"
+  elif [[ "$input" == https://* || "$input" == http://* ]]; then
+    DIRECT_URL="$input"
+    SOURCE_TYPE="direct"
+  elif [[ "$input" == */* ]]; then
+    REPO="$input"
+    SOURCE_TYPE="github"
+  else
+    err "cannot parse input: $input"
+    exit 1
+  fi
+}
+
+# ─── fetch release assets ──────────────────────────────────────────────────────
+fetch_github_assets() {
+  local repo="$1" version="${2:-latest}"
+  local api_url
+
+  if [[ "$version" == "latest" ]]; then
+    api_url="https://api.github.com/repos/${repo}/releases/latest"
+  else
+    api_url="https://api.github.com/repos/${repo}/releases/tags/${version}"
+  fi
+
+  local curl_args=(-fsSL)
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    curl_args+=(-H "Authorization: token $GITHUB_TOKEN")
+  fi
+
+  RELEASE_JSON=$(curl "${curl_args[@]}" "$api_url" 2>/dev/null) || {
+    err "failed to fetch release info for ${repo}"
+    exit 1
+  }
+
+  RELEASE_TAG=$(echo "$RELEASE_JSON" | grep -oP '"tag_name":\s*"\K[^"]+' | command head -1)
+  RELEASE_NAME=$(echo "$RELEASE_JSON" | grep -oP '"name":\s*"\K[^"]+' | command head -1)
+  RELEASE_DATE=$(echo "$RELEASE_JSON" | grep -oP '"published_at":\s*"\K[^"]+' | command head -1) || true
+
+  if [[ -z "$RELEASE_TAG" ]]; then
+    err "no release found for ${repo} (rate limited? try setting GITHUB_TOKEN)"
+    exit 1
+  fi
+
+  mapfile -t ASSET_URLS < <(echo "$RELEASE_JSON" | grep -oP '"browser_download_url":\s*"\K[^"]+')
+  mapfile -t ASSET_NAMES < <(printf '%s\n' "${ASSET_URLS[@]+"${ASSET_URLS[@]}"}" | xargs -I{} basename {})
+}
+
+fetch_gitlab_assets() {
+  local repo="$1" version="${2:-latest}"
+  local encoded_repo
+  encoded_repo=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$repo" 2>/dev/null \
+                 || echo "$repo" | sed 's|/|%2F|g')
+
+  local api_url
+  if [[ "$version" == "latest" ]]; then
+    api_url="https://gitlab.com/api/v4/projects/${encoded_repo}/releases"
+  else
+    api_url="https://gitlab.com/api/v4/projects/${encoded_repo}/releases/${version}"
+  fi
+
+  RELEASE_JSON=$(curl -fsSL "$api_url" 2>/dev/null) || {
+    err "failed to fetch gitlab release info for ${repo}"
+    exit 1
+  }
+
+  RELEASE_TAG=$(echo "$RELEASE_JSON" | grep -oP '"tag_name":\s*"\K[^"]+' | command head -1)
+  RELEASE_DATE=$(echo "$RELEASE_JSON" | grep -oP '"released_at":\s*"\K[^"]+' | command head -1) || true
+  mapfile -t ASSET_URLS < <(echo "$RELEASE_JSON" | grep -oP '"url":\s*"\K[^"]+' | grep -v 'gitlab.com/-/' | command head -20)
+  mapfile -t ASSET_NAMES < <(printf '%s\n' "${ASSET_URLS[@]+"${ASSET_URLS[@]}"}" | xargs -I{} basename {})
+}
+
+# ─── github name search ────────────────────────────────────────────────────────
+search_github() {
+  local query="$1"
+  local encoded
+  encoded=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$query" 2>/dev/null \
+            || printf '%s' "$query" | sed 's/ /+/g')
+
+  local api_url="https://api.github.com/search/repositories?q=${encoded}+in:name&sort=stars&order=desc&per_page=10"
+  local curl_args=(-fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: pkgd/0.1.0")
+  [[ -n "${GITHUB_TOKEN:-}" ]] && curl_args+=(-H "Authorization: token $GITHUB_TOKEN")
+
+  local json
+  json=$(curl "${curl_args[@]}" "$api_url" 2>/dev/null) || { err "failed to search GitHub"; return 1; }
+
+  # output: full_name TAB stars TAB description
+  if command -v python3 &>/dev/null; then
+    echo "$json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for item in data.get('items', []):
+    name  = item.get('full_name','')
+    desc  = (item.get('description') or '')[:70]
+    stars = item.get('stargazers_count', 0)
+    print(f'{name}\t{stars}\t{desc}')
+" 2>/dev/null
+  else
+    echo "$json" | _grep -oP '"full_name":\s*"\K[^"]+' | command head -10
+  fi
+}
+
+search_sys_pkgmgr() {
+  local query="$1"
+  # check ALL available package managers (not just the first one found)
+  if command -v apt-cache &>/dev/null; then
+    local apt_out
+    apt_out=$(apt-cache search "$query" 2>/dev/null | _grep -iv "^lib" | command head -8) || true
+    if [[ -n "$apt_out" ]]; then
+      # use sed to split on literal " - " (IFS would split on each char)
+      echo "$apt_out" | while read -r line; do
+        local pkgname pkgdesc
+        pkgname=$(echo "$line" | sed 's/ - .*//')
+        pkgdesc=$(echo "$line" | sed 's/^[^ ]* - //')
+        printf "apt\t%s\t%s\n" "$pkgname" "$pkgdesc"
+      done
+    fi
+  fi
+  if command -v dnf &>/dev/null; then
+    local dnf_out
+    dnf_out=$(dnf search "$query" 2>/dev/null | _grep " : " | _grep -iv "^lib" | command head -6) || true
+    if [[ -n "$dnf_out" ]]; then
+      echo "$dnf_out" | while read -r line; do
+        local pkgname pkgdesc
+        pkgname=$(echo "$line" | sed 's/ : .*//' | sed 's/\.[a-z0-9_]*$//')
+        pkgdesc=$(echo "$line" | sed 's/^[^ ]* : //')
+        printf "dnf\t%s\t%s\n" "$pkgname" "$pkgdesc"
+      done
+    fi
+  fi
+  if command -v pacman &>/dev/null; then
+    local pac_out
+    pac_out=$(pacman -Ss "$query" 2>/dev/null | _grep -v "^    " | _grep -iv "^.*/lib" | command head -6) || true
+    if [[ -n "$pac_out" ]]; then
+      echo "$pac_out" | while read -r line; do
+        local pkgname
+        pkgname=$(echo "$line" | sed 's|.*/||' | awk '{print $1}')
+        printf "pacman\t%s\t\n" "$pkgname"
+      done
+    fi
+  fi
+  if command -v flatpak &>/dev/null; then
+    local fp_out
+    fp_out=$(flatpak search --columns=name,description "$query" 2>/dev/null | _grep -iv "no matches\|no results" | command head -4) || true
+    if [[ -n "$fp_out" ]]; then
+      echo "$fp_out" | while IFS=$'\t' read -r pkgname pkgdesc; do
+        printf "flatpak\t%s\t%s\n" "$pkgname" "$pkgdesc"
+      done
+    fi
+  fi
+  if command -v snap &>/dev/null; then
+    local snap_out
+    snap_out=$(snap find "$query" 2>/dev/null | command tail -n +2 | command head -4) || true
+    if [[ -n "$snap_out" ]]; then
+      echo "$snap_out" | while read -r pkgname _rest; do
+        printf "snap\t%s\t\n" "$pkgname"
+      done
+    fi
+  fi
+}
+
+cmd_search() {
+  local query="$1"
+  section "GitHub repos matching '${query}'"
+
+  local -a gh_names gh_stars gh_descs
+  local i=0
+  while IFS=$'\t' read -r full_name star_count description; do
+    [[ -z "$full_name" ]] && continue
+    gh_names+=("$full_name")
+    gh_stars+=("$star_count")
+    gh_descs+=("$description")
+    printf "  ${lilac}%2d${rst}  ${teal}%-36s${rst}  ${yellow}★ %-7s${rst}  ${dim}%s${rst}\n" \
+      "$((++i))" "$full_name" "$star_count" "${description:0:55}"
+  done < <(search_github "$query")
+
+  # --list: show release assets of the top-matching GitHub repo
+  if [[ "$LIST_ONLY" == true ]]; then
+    if [[ "${#gh_names[@]}" -gt 0 ]]; then
+      info "fetching release assets for top match: ${gh_names[0]}"
+      resolve_source "${gh_names[0]}"
+      fetch_github_assets "$REPO" "${PIN_VERSION:-latest}"
+      list_assets
+    else
+      warn "no GitHub repos found for '${query}'"
+    fi
+    return 0
+  fi
+
+  section "system package managers"
+  local sys_results
+  sys_results=$(search_sys_pkgmgr "$query" 2>/dev/null || true)
+  if [[ -n "$sys_results" ]]; then
+    echo "$sys_results" | while IFS=$'\t' read -r manager pkgname pkgdesc; do
+      printf "  ${lilac}%-8s${rst}  ${teal}%-36s${rst}  ${dim}%s${rst}\n" \
+        "$manager" "$pkgname" "${pkgdesc:0:50}"
+    done
+  else
+    dimline "(no system packages found for '${query}')"
+  fi
+
+  # if -i flag set and we found GitHub results, auto-install top hit
+  if [[ "$INSTALL" == true && "${#gh_names[@]}" -gt 0 ]]; then
+    info "auto-selecting top result: ${gh_names[0]}"
+    INSTALL=true
+    run_install "${gh_names[0]}"
+  fi
+}
+
+# ─── list assets ──────────────────────────────────────────────────────────────
+list_assets() {
+  section "available assets for ${REPO} @ ${RELEASE_TAG}"
+  local i=0
+  for url in "${ASSET_URLS[@]}"; do
+    local name
+    name=$(basename "$url")
+    printf "  ${lilac}%2d${rst}  %s\n" "$((++i))" "$name"
+  done
+}
+
+# ─── pick best asset ──────────────────────────────────────────────────────────
+pick_asset() {
+  CHOSEN_URL=""
+  CHOSEN_NAME=""
+
+  local types=()
+  if [[ -n "$FORCE_TYPE" ]]; then
+    types=("$FORCE_TYPE")
+  else
+    types=("${PKG_PRIORITY[@]}")
+  fi
+
+  for type in "${types[@]}"; do
+    local url=""
+    case "$type" in
+      deb)
+        url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "${ARCH_ALT}\.deb$" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "\.deb$" | _grep -iv "arm|aarch|i386|i686" | command head -1) || true
+        ;;
+      rpm)
+        url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "${ARCH_TAG}\.rpm$" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "(x86_64|amd64)\.rpm$" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "\.rpm$" | _grep -iv "arm|aarch|i386|i686|src" | command head -1) || true
+        ;;
+      appimage)
+        url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "${ARCH_TAG}\.AppImage$" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "x86_64\.AppImage$" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "\.AppImage$" | command head -1) || true
+        ;;
+      tar)
+        # always exclude darwin/macos/windows in every pass
+        url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "linux.*${ARCH_TAG}.*\.tar\.(gz|xz|bz2)$" | _grep -iv "darwin|macos|osx|windows" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "${ARCH_TAG}.*\.tar\.(gz|xz|bz2)$" | _grep -iv "darwin|macos|osx|windows" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "linux.*${ARCH_ALT}.*\.tar\.(gz|xz|bz2)$" | _grep -iv "darwin|macos|osx|windows" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "linux.*\.tar\.(gz|xz|bz2)$" | _grep -iv "arm|aarch|i386|i686|darwin|macos|osx|windows" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "\.tar\.(gz|xz|bz2)$" | _grep -iv "arm|aarch|i386|i686|darwin|macos|osx|windows|src|source" | command head -1) || true
+        ;;
+      zip)
+        url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "linux.*${ARCH_ALT}.*\.zip$" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "linux.*x64.*\.zip$" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "linux.*\.zip$" | _grep -iv "arm|aarch|i386|windows|darwin" | command head -1) || true
+        ;;
+      dmg)
+        url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "\.dmg$" | command head -1) || true
+        ;;
+      bin)
+        url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "linux.*${ARCH_TAG}" | _grep -ivP "\.(deb|rpm|AppImage|tar|zip|dmg|gz|xz|bz2|sha|sig|asc|json|txt)$" | command head -1) || true
+        [[ -z "$url" ]] && url=$(printf '%s\n' "${ASSET_URLS[@]}" | _grep -iP "linux" | _grep -ivP "\.(deb|rpm|AppImage|tar|zip|dmg|gz|xz|bz2|sha|sig|asc|json|txt)$" | command head -1) || true
+        ;;
+    esac
+
+    if [[ -n "$url" ]]; then
+      CHOSEN_URL="$url"
+      CHOSEN_NAME=$(basename "$url")
+      CHOSEN_TYPE="$type"
+      return 0
+    fi
+  done
+
+  err "no compatible asset found"
+  list_assets
+  exit 1
+}
+
+# ─── download ─────────────────────────────────────────────────────────────────
+download_asset() {
+  local url="$1" dest="$2"
+  info "downloading $(basename "$dest") ..."
+  if command -v wget &>/dev/null; then
+    wget -q --show-progress "$url" -O "$dest"
+  else
+    curl -fL --progress-bar "$url" -o "$dest"
+  fi
+}
+
+# ─── desktop entry ────────────────────────────────────────────────────────────
+make_desktop_entry() {
+  local name="$1" exec_path="$2" icon="${3:-application-x-executable}"
+  mkdir -p "${HOME}/.local/share/applications"
+  cat > "${HOME}/.local/share/applications/${name}.desktop" <<DESKTOP
+[Desktop Entry]
+Name=${name}
+Exec=${exec_path}
+Icon=${icon}
+Type=Application
+Categories=Utility;
+DESKTOP
+  kbuildsycoca6 --noincremental &>/dev/null \
+    || kbuildsycoca5 --noincremental &>/dev/null \
+    || update-desktop-database "${HOME}/.local/share/applications" &>/dev/null \
+    || true
+  dimline "desktop entry → ${HOME}/.local/share/applications/${name}.desktop"
+}
+
+# ─── dep resolution (deb) ─────────────────────────────────────────────────────
+stub_dep() {
+  local dep="$1"
+  warn "stubbing unavailable dep: ${dep} (creating equivs dummy)"
+  _sudo apt-get install -y equivs 2>&1 | grep -v "^$" || true
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  cat > "${tmpdir}/equivs-stub" <<CONTROL
+Section: misc
+Priority: optional
+Standards-Version: 3.9.2
+Package: ${dep}
+Version: 999.0
+Description: stub for ${dep}
+CONTROL
+  pushd "$tmpdir" > /dev/null
+  equivs-build equivs-stub 2>/dev/null
+  _sudo dpkg -i ./*.deb 2>&1 | grep -v "^$" || true
+  popd > /dev/null
+  rm -rf "$tmpdir"
+}
+
+resolve_deb_deps() {
+  local debfile="$1"
+  info "resolving dependencies..."
+  local depline
+  depline=$(dpkg-deb -I "$debfile" | grep -oP 'Depends:\s*\K.*' | tr -d ' ')
+  local deps=()
+  mapfile -t deps < <(echo "$depline" | tr ',' '\n' | cut -d'|' -f1 | sed 's/([^)]*)//g' | tr -d ' ' | grep -v '^$') || true
+  for dep in "${deps[@]+"${deps[@]}"}"; do
+    if ! dpkg -s "$dep" &>/dev/null; then
+      warn "missing dep: ${dep}"
+      _sudo apt-get install -y "$dep" 2>&1 | grep -vE "^(Hit|Get|Fetched|Reading|Building)" || stub_dep "$dep"
+    fi
+  done
+  _sudo apt-get --fix-broken install -y 2>&1 | grep -vE "^(Hit|Get|Fetched|Reading|Building)" || true
+}
+
+# ─── install handlers ─────────────────────────────────────────────────────────
+install_deb() {
+  local file="$1" appname="$2"
+  info "installing deb..."
+
+  # record actual package name for proper removal later
+  local pkgname
+  pkgname=$(dpkg-deb -f "$file" Package 2>/dev/null) || pkgname="$appname"
+  INSTALLED_PKGNAME="$pkgname"
+
+  _sudo dpkg -i "$file" 2>&1 | grep -vE "^(Selecting|Preparing|Unpacking|Processing triggers for)" || true
+  local dpkg_exit=${PIPESTATUS[0]}
+
+  if [[ $dpkg_exit -ne 0 ]]; then
+    warn "dpkg reported errors — running dep resolution..."
+    resolve_deb_deps "$file"
+    _sudo dpkg -i "$file" 2>&1 | grep -vE "^(Selecting|Preparing|Unpacking|Processing triggers for)" || true
+    dpkg_exit=${PIPESTATUS[0]}
+  fi
+
+  _sudo apt-get --fix-broken install -y 2>&1 | grep -vE "^(Hit|Get|Fetched|Reading|Building|Ign )" || true
+
+  if dpkg -s "$pkgname" 2>/dev/null | grep -q "Status: install ok installed"; then
+    dimline "${pkgname} installed ok"
+    return 0
+  fi
+
+  warn "deb still not fully installed — trying zip fallback..."
+  local zip_url=""
+  zip_url=$(printf '%s\n' "${ASSET_URLS[@]+"${ASSET_URLS[@]}"}" | _grep -iP "linux.*\.zip$" | _grep -iv "arm|aarch" | command head -1) || true
+  if [[ -n "$zip_url" ]]; then
+    local zip_file="/tmp/$(basename "$zip_url")"
+    download_asset "$zip_url" "$zip_file"
+    install_zip "$zip_file" "$appname"
+  else
+    err "no zip fallback found — package may be partially installed"
+    return 1
+  fi
+}
+
+install_rpm() {
+  local file="$1" appname="$2"
+  info "installing rpm..."
+  local pkgname
+  pkgname=$(rpm -qp --qf "%{NAME}" "$file" 2>/dev/null) || pkgname="$appname"
+  INSTALLED_PKGNAME="$pkgname"
+
+  if command -v dnf &>/dev/null; then
+    _sudo dnf install -y "$file"
+  elif command -v zypper &>/dev/null; then
+    _sudo zypper install -y "$file"
+  else
+    _sudo rpm -i "$file"
+  fi
+}
+
+# ─── appimage icon extraction ─────────────────────────────────────────────────
+extract_appimage_icon() {
+  local appimage="$1" appname="$2"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local icon_dest=""
+
+  # APPIMAGE_EXTRACT_AND_RUN=1 bypasses FUSE (works in any environment)
+  (
+    export APPIMAGE_EXTRACT_AND_RUN=1
+    cd "$tmpdir"
+    # .DirIcon is the standard embedded icon
+    timeout 20 "$appimage" --appimage-extract '.DirIcon' 2>/dev/null || true
+    timeout 20 "$appimage" --appimage-extract 'usr/share/icons/hicolor/256x256/apps/*.png' 2>/dev/null || true
+    timeout 20 "$appimage" --appimage-extract 'usr/share/icons/hicolor/128x128/apps/*.png' 2>/dev/null || true
+    timeout 20 "$appimage" --appimage-extract '*.png' 2>/dev/null || true
+    timeout 20 "$appimage" --appimage-extract '*.svg' 2>/dev/null || true
+  ) 2>/dev/null || true
+
+  local icon_src=""
+  icon_src=$(find "$tmpdir/squashfs-root" -maxdepth 1 \( -name ".DirIcon" -o -name "*.png" -o -name "*.svg" \) 2>/dev/null | command head -1) || true
+  [[ -z "$icon_src" ]] && icon_src=$(find "$tmpdir/squashfs-root/usr/share/icons" -name "*.png" 2>/dev/null | sort -t'/' -k7 -rn | command head -1) || true
+  [[ -z "$icon_src" ]] && icon_src=$(find "$tmpdir/squashfs-root" -name "*.png" -o -name "*.svg" 2>/dev/null | command head -1) || true
+
+  if [[ -n "$icon_src" ]]; then
+    local ext="${icon_src##*.}"
+    mkdir -p "${HOME}/.local/share/pixmaps"
+    icon_dest="${HOME}/.local/share/pixmaps/${appname}.${ext}"
+    cp "$icon_src" "$icon_dest"
+    dimline "icon extracted → ${icon_dest}"
+  fi
+
+  rm -rf "$tmpdir"
+  echo "${icon_dest:-application-x-executable}"
+}
+
+# Extract Name= from the .desktop file embedded in an AppImage
+# Returns the name (lowercased, spaces→dashes), or the fallback appname
+extract_desktop_name() {
+  local appimage="$1" appname="$2"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local extracted_name=""
+
+  (
+    export APPIMAGE_EXTRACT_AND_RUN=1
+    cd "$tmpdir"
+    timeout 15 "$appimage" --appimage-extract '*.desktop' 2>/dev/null || true
+  ) 2>/dev/null || true
+
+  local desktop_file
+  desktop_file=$(find "$tmpdir/squashfs-root" -maxdepth 2 -name "*.desktop" 2>/dev/null | command head -1) || true
+
+  if [[ -n "$desktop_file" ]]; then
+    extracted_name=$(grep -m1 '^Name=' "$desktop_file" 2>/dev/null \
+      | sed 's/^Name=//' | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9\-') || true
+  fi
+
+  rm -rf "$tmpdir"
+  echo "${extracted_name:-$appname}"
+}
+
+install_appimage() {
+  local file="$1" appname="$2"
+  info "installing AppImage..."
+  mkdir -p "$PKGD_APPS"
+
+  # derive real display name from embedded .desktop file
+  info "reading embedded desktop entry..."
+  local real_name
+  real_name=$(extract_desktop_name "$file" "$appname")
+  [[ -z "$real_name" ]] && real_name="$appname"
+
+  local dest="${PKGD_APPS}/${real_name}.AppImage"
+  cp "$file" "$dest"
+  chmod +x "$dest"
+  INSTALLED_PKGNAME="$real_name"
+
+  info "extracting icon..."
+  local icon
+  icon=$(extract_appimage_icon "$dest" "$real_name")
+
+  # use env wrapper so AppImage runs without FUSE in any DE
+  make_desktop_entry "$real_name" "env APPIMAGE_EXTRACT_AND_RUN=1 ${dest}" "$icon"
+  dimline "installed → ${dest}"
+}
+
+install_tar() {
+  local file="$1" appname="$2"
+  info "extracting tar..."
+  local extract_dir="${PKGD_APPS}/${appname}"
+  mkdir -p "$extract_dir"
+  INSTALLED_PKGNAME="$appname"
+
+  tar -xf "$file" -C "$extract_dir" 2>/dev/null || tar -xf "$file" -C "$extract_dir" --strip-components=1
+
+  local bin=""
+  bin=$(find "$extract_dir" -maxdepth 4 -type f -executable -iname "${appname}" \
+        ! -name "*.so" ! -name "*.so.*" | command head -1) || true
+  [[ -z "$bin" ]] && bin=$(find "$extract_dir" -maxdepth 4 -type f -executable \
+        ! -name "*.so" ! -name "*.so.*" ! -name "*.sh" \
+        | sort | command head -1) || true
+
+  if [[ -n "$bin" ]]; then
+    _sudo ln -sf "$bin" "/usr/local/bin/${appname}"
+    # try to find an icon in the extracted dir
+    local icon_src icon=""
+    icon_src=$(find "$extract_dir" -maxdepth 4 \( -name "*.png" -o -name "*.svg" \) 2>/dev/null | sort | command head -1) || true
+    if [[ -n "$icon_src" ]]; then
+      local ext="${icon_src##*.}"
+      mkdir -p "${HOME}/.local/share/pixmaps"
+      icon="${HOME}/.local/share/pixmaps/${appname}.${ext}"
+      cp "$icon_src" "$icon"
+    fi
+    make_desktop_entry "$appname" "$bin" "${icon:-application-x-executable}"
+    dimline "linked ${bin} → /usr/local/bin/${appname}"
+  else
+    warn "no executable found in ${extract_dir} — check contents manually"
+    ls "$extract_dir" 2>/dev/null || true
+  fi
+}
+
+install_zip() {
+  local file="$1" appname="$2"
+  info "extracting zip..."
+  local extract_dir="${PKGD_APPS}/${appname}"
+  mkdir -p "$extract_dir"
+  unzip -q "$file" -d "$extract_dir"
+  INSTALLED_PKGNAME="$appname"
+
+  local bin=""
+  bin=$(find "$extract_dir" -maxdepth 3 -type f -executable -iname "${appname}" | command head -1) || true
+  [[ -z "$bin" ]] && bin=$(find "$extract_dir" -maxdepth 3 -type f -executable \
+                            ! -name "*.so" ! -name "*.so.*" | command head -1) || true
+  if [[ -n "$bin" ]]; then
+    _sudo ln -sf "$bin" "/usr/local/bin/${appname}"
+    local icon_src icon=""
+    icon_src=$(find "$extract_dir" -maxdepth 4 \( -name "*.png" -o -name "*.svg" \) 2>/dev/null | sort | command head -1) || true
+    if [[ -n "$icon_src" ]]; then
+      local ext="${icon_src##*.}"
+      mkdir -p "${HOME}/.local/share/pixmaps"
+      icon="${HOME}/.local/share/pixmaps/${appname}.${ext}"
+      cp "$icon_src" "$icon"
+    fi
+    make_desktop_entry "$appname" "$bin" "${icon:-application-x-executable}"
+    dimline "linked ${bin} → /usr/local/bin/${appname}"
+  else
+    warn "no executable found — contents at ${extract_dir}"
+  fi
+}
+
+install_dmg() {
+  local file="$1" appname="$2"
+  info "mounting dmg..."
+  INSTALLED_PKGNAME="$appname"
+  local mount_point
+  mount_point=$(hdiutil attach "$file" | awk 'END{print $NF}')
+  local app=""
+  app=$(find "$mount_point" -maxdepth 2 -name "*.app" | command head -1) || true
+  if [[ -n "$app" ]]; then
+    cp -r "$app" /Applications/
+    dimline "installed $(basename "$app") → /Applications/"
+  else
+    warn "no .app found in dmg"
+  fi
+  hdiutil detach "$mount_point" &>/dev/null
+}
+
+install_bin() {
+  local file="$1" appname="$2"
+  info "installing raw binary..."
+  INSTALLED_PKGNAME="$appname"
+  _sudo cp "$file" "/usr/local/bin/${appname}"
+  _sudo chmod +x "/usr/local/bin/${appname}"
+  dimline "installed → /usr/local/bin/${appname}"
+}
+
+# ─── pkgd database ────────────────────────────────────────────────────────────
+db_init() {
+  mkdir -p "$PKGD_DIR"
+  [[ -f "$PKGD_DB" ]] || echo '[]' > "$PKGD_DB"
+}
+
+db_record() {
+  local repo="$1" version="$2" type="$3" url="$4" name="${5:-}" date_released="${6:-}"
+  local entry
+  entry=$(printf '{"repo":"%s","name":"%s","version":"%s","asset_type":"%s","url":"%s","date":"%s","date_released":"%s"}' \
+    "$repo" "$name" "$version" "$type" "$url" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$date_released")
+  if command -v jq &>/dev/null; then
+    local tmp
+    tmp=$(mktemp)
+    jq --argjson e "$entry" \
+      'map(select(.repo != $e.repo)) + [$e]' "$PKGD_DB" > "$tmp" && mv "$tmp" "$PKGD_DB"
+  fi
+}
+
+db_list() {
+  if ! command -v jq &>/dev/null; then
+    warn "jq not found — showing raw db"
+    cat "$PKGD_DB"
+    return
+  fi
+  section "installed packages"
+  jq -r '.[] | "  \(.repo)\t\(.version)\t\(.asset_type // .type)\t\(.date)"' "$PKGD_DB" \
+    | column -t -s $'\t'
+}
+
+db_get() {
+  local repo="$1"
+  if command -v jq &>/dev/null; then
+    jq -r --arg r "$repo" '.[] | select(.repo == $r)' "$PKGD_DB"
+  fi
+}
+
+# ─── update ───────────────────────────────────────────────────────────────────
+cmd_update() {
+  local target="${1:-}"
+  db_init
+
+  local repos=()
+  if [[ -n "$target" ]]; then
+    repos=("$target")
+  else
+    if command -v jq &>/dev/null; then
+      mapfile -t repos < <(jq -r '.[].repo' "$PKGD_DB")
+    else
+      warn "jq required for bulk update"
+      return 1
+    fi
+  fi
+
+  for repo in "${repos[@]+"${repos[@]}"}"; do
+    info "checking ${repo}..."
+    local entry current_version
+    entry=$(db_get "$repo")
+    current_version=$(echo "$entry" | _grep -oP '"version":\s*"\K[^"]+' | command head -1) || true
+    resolve_source "$repo"
+    if [[ "$SOURCE_TYPE" == "github" ]]; then
+      fetch_github_assets "$REPO" "latest"
+    else
+      fetch_gitlab_assets "$REPO" "latest"
+    fi
+    if [[ "$RELEASE_TAG" == "$current_version" ]]; then
+      dimline "${repo} already up to date (${RELEASE_TAG})"
+    else
+      info "${repo}: ${current_version} → ${RELEASE_TAG}"
+      INSTALL=true
+      FORCE_TYPE=""
+      run_install "$repo"
+    fi
+  done
+}
+
+# ─── remove (actual uninstall) ────────────────────────────────────────────────
+cmd_remove() {
+  local repo="$1"
+  db_init
+
+  local entry name asset_type
+  entry=$(db_get "$repo" 2>/dev/null || true)
+  name=$(echo "$entry" | _grep -oP '"name":\s*"\K[^"]+' | command head -1)
+  asset_type=$(echo "$entry" | _grep -oP '"asset_type":\s*"\K[^"]+' | command head -1)
+  [[ -z "$asset_type" ]] && asset_type=$(echo "$entry" | _grep -oP '"type":\s*"\K[^"]+' | command head -1)
+
+  # derive appname from repo as fallback
+  local appname
+  appname=$(echo "$repo" | cut -d'/' -f2 | tr '[:upper:]' '[:lower:]')
+  [[ -n "$name" ]] && appname="$name"
+
+  info "removing ${appname} (${asset_type:-unknown})..."
+
+  case "${asset_type:-unknown}" in
+    deb)
+      local pkgname="${name:-$appname}"
+      info "removing deb: ${pkgname}"
+      # Don't gate on dpkg -s — apt-get remove is safe even if pkg isn't installed
+      _sudo apt-get remove -y "$pkgname" 2>&1 \
+        | grep -vE "^(Reading|Building|Processing triggers for)" || true
+      # try dpkg --remove as fallback if apt-get didn't do anything
+      dpkg -s "$pkgname" &>/dev/null && \
+        _sudo dpkg --remove "$pkgname" 2>&1 | grep -vE "^(Removing|Processing)" || true
+      ;;
+    rpm)
+      local pkgname="${name:-$appname}"
+      info "removing rpm: ${pkgname}"
+      if command -v dnf &>/dev/null; then
+        _sudo dnf remove -y "$pkgname" 2>&1 \
+          | grep -vE "^(Removing|Installing|Verifying|Transaction|Running|Erasing)" || true
+      elif command -v zypper &>/dev/null; then
+        _sudo zypper remove -y "$pkgname" 2>/dev/null || true
+      else
+        _sudo rpm -e "$pkgname" 2>/dev/null || true
+      fi
+      ;;
+    appimage)
+      rm -f "${PKGD_APPS}/${appname}.AppImage"
+      rm -f "${HOME}/.local/share/pixmaps/${appname}."*
+      dimline "removed AppImage and icons"
+      ;;
+    tar|zip)
+      _sudo rm -f "/usr/local/bin/${appname}"
+      rm -rf "${PKGD_APPS}/${appname}"
+      dimline "removed binary and application directory"
+      ;;
+    bin)
+      _sudo rm -f "/usr/local/bin/${appname}"
+      dimline "removed /usr/local/bin/${appname}"
+      ;;
+    *)
+      warn "unknown install type '${asset_type}' — attempting best-effort removal"
+      _sudo rm -f "/usr/local/bin/${appname}"
+      rm -rf "${PKGD_APPS}/${appname}" "${PKGD_APPS}/${appname}.AppImage"
+      ;;
+  esac
+
+  # always clean up desktop entry
+  rm -f "${HOME}/.local/share/applications/${appname}.desktop"
+  update-desktop-database "${HOME}/.local/share/applications" &>/dev/null || true
+
+  # remove from pkgd db
+  if command -v jq &>/dev/null; then
+    local tmp
+    tmp=$(mktemp)
+    jq --arg r "$repo" 'map(select(.repo != $r))' "$PKGD_DB" > "$tmp" && mv "$tmp" "$PKGD_DB"
+  fi
+
+  done_ok "${appname} removed"
+}
+
+# ─── launch installed package ─────────────────────────────────────────────────
+cmd_launch() {
+  local repo="$1"
+  db_init
+
+  local entry name asset_type
+  entry=$(db_get "$repo" 2>/dev/null || true)
+  name=$(echo "$entry" | _grep -oP '"name":\s*"\K[^"]+' | command head -1)
+  asset_type=$(echo "$entry" | _grep -oP '"asset_type":\s*"\K[^"]+' | command head -1)
+  [[ -z "$asset_type" ]] && asset_type=$(echo "$entry" | _grep -oP '"type":\s*"\K[^"]+' | command head -1)
+
+  local appname
+  appname=$(echo "$repo" | cut -d'/' -f2 | tr '[:upper:]' '[:lower:]')
+  [[ -n "$name" ]] && appname="$name"
+
+  info "launching ${appname} (${asset_type:-unknown})..."
+
+  case "${asset_type:-unknown}" in
+    appimage)
+      local ai_path="${PKGD_APPS}/${appname}.AppImage"
+      if [[ ! -x "$ai_path" ]]; then
+        err "AppImage not found: ${ai_path}"
+        exit 1
+      fi
+      export APPIMAGE_EXTRACT_AND_RUN=1
+      nohup "$ai_path" &>/dev/null &
+      disown
+      dimline "launched ${ai_path} (PID $!)"
+      ;;
+    deb|rpm)
+      # deb/rpm packages integrate into the system — try running by name
+      if command -v "$appname" &>/dev/null; then
+        nohup "$appname" &>/dev/null &
+        disown
+        dimline "launched ${appname}"
+      else
+        # try to find and launch the .desktop entry via xdg-open
+        local desktop_file="${HOME}/.local/share/applications/${appname}.desktop"
+        if [[ -f "$desktop_file" ]]; then
+          xdg-open "$desktop_file" &>/dev/null &
+          disown
+          dimline "launched via desktop entry"
+        else
+          err "don't know how to launch ${appname} — try opening it from your app menu"
+          exit 1
+        fi
+      fi
+      ;;
+    tar|zip|bin)
+      local bin_path="/usr/local/bin/${appname}"
+      if [[ -x "$bin_path" ]]; then
+        nohup "$bin_path" &>/dev/null &
+        disown
+        dimline "launched ${bin_path} (PID $!)"
+      else
+        err "binary not found: ${bin_path}"
+        exit 1
+      fi
+      ;;
+    *)
+      err "don't know how to launch ${appname} (type: ${asset_type:-unknown})"
+      exit 1
+      ;;
+  esac
+}
+
+# ─── main install flow ────────────────────────────────────────────────────────
+run_install() {
+  local input="$1"
+  INSTALLED_PKGNAME=""
+  RELEASE_DATE=""
+
+  resolve_source "$input"
+
+  if [[ "$SOURCE_TYPE" == "direct" ]]; then
+    CHOSEN_URL="$DIRECT_URL"
+    CHOSEN_NAME=$(basename "$DIRECT_URL" | cut -d'?' -f1)
+    CHOSEN_TYPE="bin"
+    case "$CHOSEN_NAME" in
+      *.deb)                         CHOSEN_TYPE="deb" ;;
+      *.rpm)                         CHOSEN_TYPE="rpm" ;;
+      *.AppImage|*.appimage)         CHOSEN_TYPE="appimage" ;;
+      *.tar.gz|*.tar.xz|*.tar.bz2)  CHOSEN_TYPE="tar" ;;
+      *.zip)                         CHOSEN_TYPE="zip" ;;
+      *.dmg)                         CHOSEN_TYPE="dmg" ;;
+    esac
+    # extract version tag from GitHub release download URL
+    RELEASE_TAG=$(printf '%s' "$DIRECT_URL" | grep -oP '/releases/download/\K[^/]+' 2>/dev/null || true)
+    [[ -z "$RELEASE_TAG" ]] && RELEASE_TAG="direct"
+    # REPO already set by resolve_source() for GitHub download URLs; fallback
+    [[ -z "$REPO" ]] && REPO="$input"
+  else
+    info "fetching release info for ${REPO}..."
+    if [[ "$SOURCE_TYPE" == "github" ]]; then
+      fetch_github_assets "$REPO" "${PIN_VERSION:-latest}"
+    else
+      fetch_gitlab_assets "$REPO" "${PIN_VERSION:-latest}"
+    fi
+    info "latest release: ${RELEASE_TAG}"
+
+    if [[ "$LIST_ONLY" == true ]]; then
+      list_assets
+      return 0
+    fi
+
+    pick_asset
+    info "selected: ${CHOSEN_NAME} (${CHOSEN_TYPE})"
+  fi
+
+  local tmp_file="/tmp/${CHOSEN_NAME}"
+  download_asset "$CHOSEN_URL" "$tmp_file"
+
+  if [[ "$INSTALL" == false ]]; then
+    info "saved to ${tmp_file}"
+    return 0
+  fi
+
+  local appname
+  appname=$(echo "$REPO" | cut -d'/' -f2 | tr '[:upper:]' '[:lower:]')
+
+  case "$CHOSEN_TYPE" in
+    deb)      install_deb      "$tmp_file" "$appname" ;;
+    rpm)      install_rpm      "$tmp_file" "$appname" ;;
+    appimage) install_appimage "$tmp_file" "$appname" ;;
+    tar)      install_tar      "$tmp_file" "$appname" ;;
+    zip)      install_zip      "$tmp_file" "$appname" ;;
+    dmg)      install_dmg      "$tmp_file" "$appname" ;;
+    bin)      install_bin      "$tmp_file" "$appname" ;;
+  esac
+
+  db_init
+  local final_name="${INSTALLED_PKGNAME:-$appname}"
+  db_record "$REPO" "$RELEASE_TAG" "$CHOSEN_TYPE" "$CHOSEN_URL" "$final_name" "${RELEASE_DATE:-}"
+  done_ok "${REPO} ${RELEASE_TAG} (${CHOSEN_TYPE}) → ${final_name}"
+}
+
+# ─── entry point ──────────────────────────────────────────────────────────────
+main() {
+  detect_os
+  parse_args "$@"
+
+  case "$CMD" in
+    install)
+      [[ -z "$INPUT" ]] && { usage; exit 1; }
+      run_install "$INPUT"
+      ;;
+    search)
+      cmd_search "${SEARCH_QUERY}"
+      ;;
+    update)
+      cmd_update "${UPDATE_TARGET:-}"
+      ;;
+    list)
+      db_init
+      db_list
+      ;;
+    remove)
+      [[ -z "$INPUT" ]] && { err "remove requires a repo"; exit 1; }
+      db_init
+      cmd_remove "$INPUT"
+      ;;
+    launch)
+      [[ -z "$INPUT" ]] && { err "launch requires a repo"; exit 1; }
+      cmd_launch "$INPUT"
+      ;;
+  esac
+}
+
+main "$@"

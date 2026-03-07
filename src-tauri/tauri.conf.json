@@ -1,0 +1,43 @@
+{
+  "productName": "pkgd",
+  "version": "0.1.0",
+  "identifier": "studio.sudoxreboot.pkgd",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "pkgd",
+        "width": 960,
+        "height": 680,
+        "minWidth": 760,
+        "minHeight": 540,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm"],
+    "icon": [
+      "icons/pkgd_icon.png"
+    ],
+    "linux": {
+      "deb": {
+        "postInstallScript": "../packaging/postinst",
+        "preRemoveScript": "../packaging/prerm"
+      }
+    }
+  },
+  "plugins": {}
+}

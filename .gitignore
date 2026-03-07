@@ -1,0 +1,17 @@
+# Node
+node_modules/
+dist/
+
+# Tauri build artifacts
+src-tauri/target/
+
+# Secrets / local config
+.env
+*.env
+
+# Claude session data
+.claude/
+
+# OS junk
+.DS_Store
+Thumbs.db

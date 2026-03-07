@@ -1,0 +1,2387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>pkgd</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ── reset & base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #1f1f1f;
+      --bg2:      #272727;
+      --bg3:      #2e2e2e;
+      --border:   #383838;
+      --teal:     #88ffee;
+      --lilac:    #aaaaff;
+      --lilac2:   #7878cc;
+      --text:     #88ffee;
+      --text2:    #aaaaff;
+      --text3:    #666688;
+      --red:      #ff6677;
+      --yellow:   #ffdd88;
+      --green:    #88ffaa;
+      --grid:     rgba(130, 100, 220, 0.045);
+      --radius:   8px;
+      --radius-lg: 12px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+    /* lilac grid overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 32px 32px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #app {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* ── titlebar ── */
+    .titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      user-select: none;
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+    }
+    .titlebar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 18px;
+      color: var(--teal);
+      letter-spacing: -0.5px;
+    }
+    .version-badge {
+      font-size: 10px;
+      color: var(--text3);
+      background: var(--bg3);
+      padding: 2px 7px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+    }
+    .os-badge {
+      font-size: 10px;
+      color: var(--lilac);
+      background: rgba(170,170,255,0.08);
+      padding: 2px 8px;
+      border-radius: 20px;
+      border: 1px solid rgba(170,170,255,0.2);
+    }
+
+    /* ── tabs ── */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      padding: 0 20px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      -webkit-app-region: no-drag;
+    }
+    .tab {
+      padding: 10px 18px;
+      cursor: pointer;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text3);
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+    .tab:hover { color: var(--text2); }
+    .tab.active {
+      color: var(--teal);
+      border-bottom-color: var(--teal);
+    }
+
+    /* ── panels ── */
+    .panel {
+      display: none;
+      flex: 1;
+      overflow: hidden;
+      flex-direction: column;
+    }
+    .panel.active { display: flex; }
+
+    /* ── install panel ── */
+    .install-panel {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .install-main {
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      gap: 12px;
+      overflow-y: auto;
+    }
+
+    .search-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .search-input {
+      flex: 1;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .search-input::placeholder { color: var(--text3); }
+    .search-input:focus { border-color: var(--teal); }
+
+    .btn {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text2);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      padding: 10px 18px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .btn:hover {
+      background: var(--bg2);
+      border-color: var(--text3);
+      color: var(--text);
+    }
+    .btn.primary {
+      background: rgba(136,255,238,0.1);
+      border-color: rgba(136,255,238,0.3);
+      color: var(--teal);
+    }
+    .btn.primary:hover {
+      background: rgba(136,255,238,0.18);
+      border-color: var(--teal);
+    }
+    .btn.danger {
+      background: rgba(255,102,119,0.08);
+      border-color: rgba(255,102,119,0.25);
+      color: var(--red);
+    }
+    .btn.danger:hover {
+      background: rgba(255,102,119,0.15);
+      border-color: var(--red);
+    }
+    .btn.yellow {
+      background: rgba(255,221,136,0.08);
+      border-color: rgba(255,221,136,0.25);
+      color: var(--yellow);
+    }
+    .btn.yellow:hover {
+      background: rgba(255,221,136,0.15);
+      border-color: var(--yellow);
+    }
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* ── github name search results ── */
+    .search-results-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .search-result-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .search-result-card:hover {
+      border-color: var(--lilac);
+      background: rgba(170,170,255,0.06);
+    }
+    .sr-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 3px;
+    }
+    .sr-name {
+      font-size: 13px;
+      color: var(--teal);
+      font-weight: 500;
+    }
+    .sr-stars {
+      font-size: 11px;
+      color: var(--yellow);
+    }
+    .sr-desc {
+      font-size: 11px;
+      color: var(--text3);
+      line-height: 1.4;
+    }
+    .results-label {
+      font-size: 11px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+
+    /* ── sys pkgmgr search results ── */
+    .sys-search-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .sys-search-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .sys-search-card:hover { border-color: var(--text3); }
+    .sys-card-info { flex: 1; }
+    .sys-card-name {
+      font-size: 12px;
+      color: var(--text2);
+    }
+    .sys-card-desc {
+      font-size: 10px;
+      color: var(--text3);
+      margin-top: 2px;
+    }
+
+    /* release info */
+    .release-info {
+      display: none;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+    .release-info.visible { display: block; }
+    .release-tag {
+      font-family: 'Syne', sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--teal);
+    }
+    .release-repo {
+      font-size: 11px;
+      color: var(--text3);
+      margin-top: 2px;
+    }
+
+    /* asset list */
+    .assets-label {
+      font-size: 11px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+    .assets-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .asset-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .asset-item:hover { border-color: var(--text3); background: var(--bg3); }
+    .asset-item.selected {
+      border-color: var(--teal);
+      background: rgba(136,255,238,0.06);
+    }
+    .asset-type-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    .badge-deb     { background: rgba(136,255,238,0.12); color: var(--teal); }
+    .badge-rpm     { background: rgba(255,180,80,0.12);  color: #ffb450; }
+    .badge-appimage{ background: rgba(170,170,255,0.12); color: var(--lilac); }
+    .badge-tar     { background: rgba(136,255,170,0.12); color: var(--green); }
+    .badge-zip     { background: rgba(136,255,170,0.12); color: var(--green); }
+    .badge-bin     { background: rgba(255,102,119,0.10); color: var(--red); }
+    .badge-dmg     { background: rgba(170,170,255,0.12); color: var(--lilac); }
+    .badge-other   { background: rgba(100,100,100,0.2);  color: var(--text3); }
+    .badge-apt     { background: rgba(255,221,136,0.12); color: var(--yellow); }
+    .badge-flatpak { background: rgba(136,200,255,0.12); color: #88ccff; }
+    .badge-snap    { background: rgba(255,136,200,0.12); color: #ff88c8; }
+    .badge-dnf     { background: rgba(255,180,80,0.12);  color: #ffb450; }
+    .badge-pacman  { background: rgba(80,200,180,0.12);  color: #50c8b4; }
+    .badge-win     { background: rgba(100,149,237,0.12); color: #6595dd; }
+
+    .asset-name {
+      flex: 1;
+      font-size: 12px;
+      color: var(--text2);
+      word-break: break-all;
+    }
+    .asset-size {
+      font-size: 11px;
+      color: var(--text3);
+      flex-shrink: 0;
+    }
+
+    .install-action-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .install-action-row .btn { flex: 1; }
+
+    /* log panel */
+    .log-panel {
+      border-left: 1px solid var(--border);
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .log-title {
+      font-size: 11px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .log-output {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+    .log-line { margin-bottom: 1px; }
+    .log-line.info  { color: var(--teal); }
+    .log-line.warn  { color: var(--yellow); }
+    .log-line.err   { color: var(--red); }
+    .log-line.done  { color: var(--green); }
+    .log-line.plain { color: var(--text2); }
+    .log-line.dim   { color: var(--text3); }
+
+    /* status dot */
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text3);
+      flex-shrink: 0;
+    }
+    .status-dot.running { background: var(--yellow); animation: pulse 1s infinite; }
+    .status-dot.ok      { background: var(--green); }
+    .status-dot.error   { background: var(--red); }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+
+    /* ── installed panel ── */
+    .installed-panel {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .installed-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .section-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text2);
+      flex-shrink: 0;
+    }
+    .section-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 8px 0 4px;
+    }
+    .installed-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .pkg-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    /* ── pkg-row — used by detected / deps / os-base sections ── */
+    .pkg-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      flex-wrap: wrap;
+    }
+    .pkg-info  { flex: 1; min-width: 140px; }
+    .pkg-name  { display: block; font-size: 13px; color: var(--teal); font-weight: 500; }
+    .pkg-repo-label { display: block; font-size: 10px; color: var(--text3); margin-top: 1px; }
+    .pkg-dates { display: flex; flex-direction: column; gap: 2px; font-size: 10px; }
+    .pkg-version { color: var(--text2); }
+    .pkg-date    { color: var(--text3); }
+    .pkg-actions { display: flex; align-items: center; gap: 8px; }
+
+    /* ── pkg-card — managed packages, split-column layout ── */
+    .pkg-card {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      column-gap: 16px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      transition: border-color 0.15s;
+    }
+    .pkg-card:hover { border-color: rgba(136,255,238,0.18); }
+    .pkg-card-left  { min-width: 0; }
+    .pkg-card-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 3px;
+    }
+    .pkg-card-top-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pkg-card-version {
+      font-size: 11px;
+      color: var(--text2);
+      white-space: nowrap;
+    }
+    .pkg-card-date {
+      font-size: 10px;
+      color: var(--text3);
+    }
+    .pkg-update-inline {
+      font-size: 10px;
+      color: var(--yellow);
+      white-space: nowrap;
+    }
+    .pkg-update-inline:empty, .pkg-update-inline[data-hidden] { display: none; }
+    .installed-version-indicator {
+      font-size: 10px;
+      color: var(--green);
+      background: rgba(136,255,170,0.08);
+      border: 1px solid rgba(136,255,170,0.2);
+      border-radius: 4px;
+      padding: 2px 8px;
+    }
+
+    /* ── controls flyout ── */
+    .pkg-controls-btn {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 5px 9px;
+      flex-shrink: 0;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .pkg-controls-btn:hover {
+      border-color: var(--lilac);
+      background: rgba(170,170,255,0.08);
+    }
+    #_gflyout {
+      position: fixed;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      min-width: 190px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.55);
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #_gflyout.open { display: flex; }
+    .flyout-item {
+      padding: 8px 16px;
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+      font-family: 'JetBrains Mono', monospace;
+      transition: background 0.1s;
+      white-space: nowrap;
+    }
+    .flyout-item:hover { background: rgba(255,255,255,0.05); }
+    .flyout-item.danger  { color: var(--red); }
+    .flyout-item.success { color: var(--green); }
+    .flyout-item.locked  { color: var(--yellow); }
+    .flyout-sep { border: none; border-top: 1px solid var(--border); margin: 3px 0; }
+
+    /* legacy compat */
+    .update-area  { display: flex; align-items: center; gap: 6px; }
+    .update-badge { font-size: 10px; color: var(--yellow); }
+    .up-to-date   { font-size: 10px; color: var(--green); }
+    .checking-label { font-size: 10px; color: var(--text3); }
+    .empty-state {
+      text-align: center;
+      color: var(--text3);
+      padding: 60px 20px;
+      font-size: 12px;
+    }
+
+    /* ── sys pkgs section — alphabetical tabs ── */
+    .alpha-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      margin-bottom: 10px;
+    }
+    .alpha-tab {
+      padding: 2px 7px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text3);
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .alpha-tab:hover { border-color: var(--text3); color: var(--text2); }
+    .alpha-tab.active {
+      background: rgba(136,255,238,0.1);
+      border-color: rgba(136,255,238,0.35);
+      color: var(--teal);
+    }
+    .sys-pkg-count {
+      font-size: 10px;
+      color: var(--text3);
+      align-self: center;
+    }
+
+    /* ── settings panel ── */
+    .settings-panel {
+      padding: 24px;
+      overflow-y: auto;
+      flex: 1;
+      max-width: 640px;
+    }
+    .setting-group {
+      margin-bottom: 28px;
+    }
+    .setting-group-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text2);
+      margin-bottom: 4px;
+    }
+    .setting-group-desc {
+      font-size: 11px;
+      color: var(--text3);
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+
+    /* priority drag list */
+    .priority-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .priority-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      cursor: grab;
+      user-select: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .priority-item:active { cursor: grabbing; }
+    .priority-item.drag-over {
+      border-color: var(--lilac);
+      background: rgba(170,170,255,0.08);
+    }
+    .drag-handle {
+      color: var(--text3);
+      font-size: 14px;
+      cursor: grab;
+    }
+    .priority-item-name {
+      flex: 1;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .priority-item-toggle {
+      appearance: none;
+      width: 32px;
+      height: 18px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.2s;
+    }
+    .priority-item-toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px; left: 2px;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--text3);
+      transition: transform 0.2s, background 0.2s;
+    }
+    .priority-item-toggle:checked {
+      background: rgba(136,255,238,0.15);
+      border-color: rgba(136,255,238,0.4);
+    }
+    .priority-item-toggle:checked::after {
+      transform: translateX(14px);
+      background: var(--teal);
+    }
+
+    /* text input */
+    .setting-input {
+      width: 100%;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      padding: 9px 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .setting-input::placeholder { color: var(--text3); }
+    .setting-input:focus { border-color: var(--lilac); }
+
+    .save-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px;
+    }
+    .save-status {
+      font-size: 11px;
+      color: var(--green);
+      align-self: center;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .save-status.visible { opacity: 1; }
+
+    /* scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+  </style>
+</head>
+<body>
+<div id="app">
+  <!-- titlebar -->
+  <div class="titlebar">
+    <div class="titlebar-left">
+      <span class="logo">pkgd</span>
+      <span class="version-badge">v0.1.0</span>
+    </div>
+    <span class="os-badge" id="os-badge">detecting...</span>
+  </div>
+
+  <!-- tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="install">install</div>
+    <div class="tab" data-tab="installed">installed</div>
+    <div class="tab" data-tab="settings">settings</div>
+  </div>
+
+  <!-- ── install panel ── -->
+  <div class="panel active" id="tab-install">
+    <div class="install-panel">
+      <div class="install-main">
+
+        <!-- search -->
+        <div class="search-row">
+          <input
+            class="search-input"
+            id="search-input"
+            type="text"
+            placeholder="package name  ·  owner/repo  ·  github URL"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="btn primary" id="search-btn">search</button>
+          <button class="btn primary" id="auto-install-btn">⚡ auto install</button>
+        </div>
+
+        <!-- github name search results -->
+        <div id="search-results" style="display:none">
+          <div class="results-label">github repos — click to load release</div>
+          <div class="search-results-list" id="search-results-list"></div>
+        </div>
+
+        <!-- system pkgmgr search results -->
+        <div id="sys-search-results" style="display:none">
+          <div class="results-label" style="margin-top:4px">system packages (apt · flatpak · snap)</div>
+          <div class="sys-search-list" id="sys-search-list"></div>
+        </div>
+
+        <!-- release info -->
+        <div class="release-info" id="release-info">
+          <div class="release-tag" id="release-tag"></div>
+          <div class="release-repo" id="release-repo"></div>
+        </div>
+
+        <!-- assets -->
+        <div id="assets-section" style="display:none">
+          <div class="assets-label">available assets</div>
+          <div class="assets-list" id="assets-list"></div>
+        </div>
+
+        <!-- per-asset install row (shown after selecting an asset) -->
+        <div class="install-action-row" id="install-action-row" style="display:none">
+          <button class="btn" id="download-btn">download only</button>
+          <button class="btn primary" id="install-btn">install selected</button>
+        </div>
+
+      </div>
+
+      <!-- log panel -->
+      <div class="log-panel">
+        <div class="log-header">
+          <span class="log-title">output</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <div class="status-dot" id="status-dot"></div>
+            <button class="btn" style="padding:4px 10px;font-size:10px;" id="clear-log-btn">clear</button>
+          </div>
+        </div>
+        <div class="log-output" id="log-output">
+          <div class="log-line dim">ready.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── installed panel ── -->
+  <div class="panel" id="tab-installed">
+    <div class="installed-panel">
+
+      <!-- pkgd managed packages -->
+      <div class="installed-header">
+        <div class="section-title">pkgd managed</div>
+        <div class="installed-actions">
+          <button class="btn" style="font-size:10px;padding:4px 10px" onclick="loadInstalled()" title="reload list">↺</button>
+          <button class="btn primary" style="font-size:10px;padding:4px 10px" onclick="updateAll()">↑ update all</button>
+        </div>
+      </div>
+      <div class="pkg-grid" id="pkg-grid">
+        <div class="empty-state">no packages installed via pkgd yet.</div>
+      </div>
+
+      <!-- detected packages: installed on system, not tracked by pkgd — always visible -->
+      <hr class="section-divider" id="detected-divider" style="display:none" />
+      <div id="detected-section" style="display:none">
+        <div class="installed-header" style="margin-bottom:8px">
+          <div class="section-title">detected packages</div>
+          <span class="sys-pkg-count" id="detected-pkg-count"></span>
+        </div>
+        <div class="alpha-tabs" id="detected-alpha-tabs"></div>
+        <div class="pkg-grid" id="detected-pkg-grid">
+          <div class="empty-state" style="padding:20px">scanning…</div>
+        </div>
+      </div>
+
+      <!-- dependencies: auto-installed apt deps, toggled -->
+      <hr class="section-divider" id="dep-divider" style="display:none" />
+      <div id="dep-section" style="display:none">
+        <div class="installed-header" style="margin-bottom:8px">
+          <div class="section-title">dependencies</div>
+          <span class="sys-pkg-count" id="dep-pkg-count"></span>
+          <button class="btn" id="toggle-dep-btn"
+            style="font-size:10px;padding:4px 10px;margin-left:auto"
+            onclick="toggleDepSection()">show</button>
+        </div>
+        <div id="dep-body" style="display:none">
+          <div class="alpha-tabs" id="dep-alpha-tabs"></div>
+          <div class="pkg-grid" id="dep-pkg-grid">
+            <div class="empty-state" style="padding:20px">scanning…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- os base toggle trigger — always visible, sits just above the os-base section -->
+      <div id="show-os-row" style="display:flex;justify-content:flex-end;padding:6px 0 2px">
+        <button class="btn" id="show-os-btn"
+          title="use at your own risk"
+          style="font-size:10px;padding:4px 10px"
+          onclick="toggleSysPkgs()">show os packages</button>
+      </div>
+
+      <!-- os base packages — dangerous, hidden behind toggle -->
+      <hr class="section-divider" id="sys-pkgs-divider" style="display:none" />
+      <div id="sys-pkgs-section" style="display:none">
+        <div class="installed-header" style="margin-bottom:8px">
+          <div class="section-title">os base packages</div>
+          <span class="sys-pkg-count" id="sys-pkg-count"></span>
+          <button class="btn" id="toggle-sys-pkgs-btn"
+            title="use at your own risk"
+            style="font-size:10px;padding:4px 10px;margin-left:4px"
+            onclick="toggleSysPkgs()">hide</button>
+          <button class="btn" style="font-size:10px;padding:4px 10px;margin-left:auto" onclick="loadSystemPackages()">↺</button>
+        </div>
+        <div class="alpha-tabs" id="sys-alpha-tabs"></div>
+        <div class="pkg-grid" id="sys-pkg-grid">
+          <div class="empty-state" style="padding:20px">loading…</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── settings panel ── -->
+  <div class="panel" id="tab-settings">
+    <div class="settings-panel">
+
+      <div class="setting-group">
+        <div class="setting-group-title">asset type priority</div>
+        <div class="setting-group-desc">
+          drag to reorder. toggle off to completely exclude a type.
+          assets are listed in this order; toggled-off types are hidden entirely.
+        </div>
+        <div class="priority-list" id="priority-list"></div>
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-group-title">github token</div>
+        <div class="setting-group-desc">
+          optional. increases rate limit from 60 to 5000 req/hr.
+          token needs no special scopes for public repos.
+        </div>
+        <input class="setting-input" id="github-token" type="password" placeholder="ghp_..." />
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-group-title">applications directory</div>
+        <div class="setting-group-desc">
+          where appimages and extracted archives are placed.
+          default: ~/applications
+        </div>
+        <input class="setting-input" id="install-dir" type="text" placeholder="~/applications" />
+      </div>
+
+      <div class="save-row">
+        <button class="btn primary" id="save-settings-btn">save settings</button>
+        <span class="save-status" id="save-status">saved.</span>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+
+// ── state ──────────────────────────────────────────────────────────────────
+const state = {
+  release: null,
+  selectedAsset: null,
+  settings: null,
+  osInfo: { os: 'linux', distro: 'linux', arch: 'x86_64' },
+  pkgManagers: [],          // which pkg managers are available on this system
+  allSysPkgs: [],           // full list for os base tab
+  sysActiveLetter: '',      // currently selected alpha tab letter (os base)
+  allDetectedPkgs: [],      // full list for detected section
+  detectedActiveLetter: '', // currently selected alpha tab letter (detected)
+  allDepPkgs: [],           // full list for dependencies section
+  depActiveLetter: '',      // currently selected alpha tab letter (deps)
+  sysSearchResults: [],     // last sys pkgmgr search results (for auto-install)
+  updateStatuses: {},       // repo → { has_update, latest }
+};
+
+// ── utils ──────────────────────────────────────────────────────────────────
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => [...document.querySelectorAll(sel)];
+
+function fmtSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function fmtStars(n) {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString(); } catch { return ''; }
+}
+
+function badgeClass(type) {
+  const known = new Set(['deb','rpm','appimage','tar','zip','bin','dmg','win','other',
+                         'apt','flatpak','snap','dnf','pacman']);
+  return `badge-${known.has(type) ? type : 'other'}`;
+}
+
+// ── arch / os filtering ────────────────────────────────────────────────────
+const ARCH_EXCLUDES = {
+  x86_64:  ['arm', 'arm64', 'aarch64', 'armhf', 'armv7', 'armv6', 'armv5', 'i386', 'i686', '386', 'riscv64', 's390x', 'ppc64', 'mips'],
+  aarch64: ['x86_64', 'amd64', 'x86', 'i386', 'i686', '386'],
+  arm:     ['x86_64', 'amd64', 'aarch64', 'arm64', 'i386', 'i686'],
+  x86:     ['x86_64', 'amd64', 'aarch64', 'arm64', 'armhf'],
+};
+const OS_EXCLUDES_LINUX  = ['darwin', 'macos', 'mac', 'osx', 'windows', 'win32', 'win64', 'msvc', 'apple', 'freebsd', 'openbsd', 'netbsd', 'ios', 'android'];
+const OS_EXCLUDES_MACOS  = ['linux', 'windows', 'win32', 'win64'];
+const OS_EXTENSIONS_WIN  = ['.exe', '.msi', '.bat'];
+const OS_EXTENSIONS_MAC  = ['.dmg', '.pkg'];
+
+function tokenize(name) {
+  return name.toLowerCase().split(/[-_.]+/);
+}
+
+function isArchCompatible(assetName, arch) {
+  const tokens = tokenize(assetName);
+  const excludes = ARCH_EXCLUDES[arch] || [];
+  return !excludes.some(ex => tokens.includes(ex));
+}
+
+function isOsCompatible(assetName, os) {
+  const lower = assetName.toLowerCase();
+  const tokens = tokenize(lower);
+  if (os === 'linux') {
+    if (OS_EXCLUDES_LINUX.some(t => tokens.includes(t))) return false;
+    if (OS_EXTENSIONS_WIN.some(ext => lower.endsWith(ext))) return false;
+    if (OS_EXTENSIONS_MAC.some(ext => lower.endsWith(ext))) return false;
+  } else if (os === 'macos') {
+    if (OS_EXCLUDES_MACOS.some(t => tokens.includes(t))) return false;
+    if (OS_EXTENSIONS_WIN.some(ext => lower.endsWith(ext))) return false;
+  }
+  return true;
+}
+
+// ── log ───────────────────────────────────────────────────────────────────
+function log(text, type = 'plain') {
+  const out = $('#log-output');
+  const strip = text.replace(/\x1B\[[0-9;]*[mGKHFABCDJK]/g, '').replace(/\r/g, '').trim();
+  if (!strip) return;
+  if (/\d+%\s*[\[=\-]/.test(strip) || /[=\-]{4,}/.test(strip)) return;
+
+  const line = document.createElement('div');
+  if (strip.startsWith(':: done:') || strip.startsWith('done:')) {
+    line.className = 'log-line done';
+  } else if (strip.startsWith(':: ') || /^(fetching|downloading|installing|extracting|resolving)\b/i.test(strip)) {
+    line.className = 'log-line info';
+  } else if (strip.startsWith('!! ERROR:') || /^error:/i.test(strip)) {
+    line.className = 'log-line err';
+  } else if (strip.startsWith('!! ')) {
+    line.className = 'log-line warn';
+  } else if (strip.startsWith('   ') || strip.includes(' → ') || strip.startsWith('──')) {
+    line.className = 'log-line dim';
+  } else {
+    line.className = `log-line ${type}`;
+  }
+  line.textContent = strip;
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+}
+
+function setStatus(s) {
+  $('#status-dot').className = `status-dot ${s}`;
+}
+
+function setAllInstallBtns(disabled) {
+  ['#install-btn', '#download-btn', '#auto-install-btn'].forEach(s => {
+    const el = $(s);
+    if (el) el.disabled = disabled;
+  });
+}
+
+// ── tabs ──────────────────────────────────────────────────────────────────
+$$('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    $$('.tab').forEach(t => t.classList.remove('active'));
+    $$('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    $(`#tab-${tab.dataset.tab}`).classList.add('active');
+    if (tab.dataset.tab === 'installed') loadInstalled();
+    if (tab.dataset.tab === 'settings') loadSettings();
+  });
+});
+
+// ── os + pkg manager detection ─────────────────────────────────────────────
+invoke('detect_os').then(info => {
+  state.osInfo = info;
+  $('#os-badge').textContent = `${info.distro} · ${info.arch}`;
+}).catch(() => {
+  $('#os-badge').textContent = 'linux';
+});
+
+invoke('detect_pkg_managers').then(mgrs => {
+  state.pkgManagers = mgrs;
+  // Re-render priority list now that we know which managers are available
+  if (state.settings) renderPriorityList();
+}).catch(() => {
+  // fallback — assume common Debian setup
+  state.pkgManagers = ['dpkg', 'apt'];
+});
+
+// ── asset rendering ────────────────────────────────────────────────────────
+function renderAssets(assets, settings) {
+  const list = $('#assets-list');
+  list.innerHTML = '';
+
+  // always use fresh settings (ensure state.settings is authoritative)
+  const s       = settings || state.settings || { priority: [], excluded_types: [] };
+  const prio     = s.priority || [];
+  const excluded = new Set(s.excluded_types || []);
+  const arch     = state.osInfo.arch;
+  const os       = state.osInfo.os;
+
+  // filter: excluded types AND wrong arch/OS are hidden
+  const visible = assets.filter(a =>
+    !excluded.has(a.asset_type) &&
+    isOsCompatible(a.name, os) &&
+    isArchCompatible(a.name, arch)
+  );
+
+  // sort by settings priority order
+  visible.sort((a, b) => {
+    const ai = prio.indexOf(a.asset_type);
+    const bi = prio.indexOf(b.asset_type);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
+
+  visible.forEach((asset, i) => {
+    const item = makeAssetItem(asset);
+    list.appendChild(item);
+    if (i === 0) item.click(); // auto-select first
+  });
+
+  $('#assets-section').style.display = visible.length ? 'block' : 'none';
+
+  if (visible.length === 0 && assets.length > 0) {
+    list.innerHTML = `<div class="empty-state" style="padding:20px">all ${assets.length} assets excluded by type/arch/OS filters</div>`;
+    $('#assets-section').style.display = 'block';
+  }
+}
+
+function makeAssetItem(asset) {
+  const item = document.createElement('div');
+  item.className = 'asset-item';
+  item.innerHTML = `
+    <span class="asset-type-badge ${badgeClass(asset.asset_type)}">${asset.asset_type}</span>
+    <span class="asset-name">${asset.name}</span>
+    <span class="asset-size">${fmtSize(asset.size)}</span>
+  `;
+  item.addEventListener('click', () => {
+    $$('.asset-item').forEach(el => el.classList.remove('selected'));
+    item.classList.add('selected');
+    state.selectedAsset = asset;
+    $('#install-action-row').style.display = 'flex';
+  });
+  return item;
+}
+
+// ── search ────────────────────────────────────────────────────────────────
+function resetSearchUI() {
+  $('#search-results').style.display = 'none';
+  $('#sys-search-results').style.display = 'none';
+  $('#release-info').classList.remove('visible');
+  $('#assets-section').style.display = 'none';
+  $('#install-action-row').style.display = 'none';
+  state.release = null;
+  state.selectedAsset = null;
+}
+
+async function doNameSearch(name) {
+  resetSearchUI();
+  log(`:: searching for "${name}"...`, 'info');
+  setStatus('running');
+  $('#search-btn').disabled = true;
+
+  // load fresh settings
+  const s = await invoke('load_settings').catch(() => state.settings);
+  state.settings = s || state.settings;
+  const token = s?.github_token || null;
+
+  // run GitHub search and sys pkgmgr search in parallel
+  log('   checking system package managers...', 'dim');
+  const [ghResults, sysResults] = await Promise.allSettled([
+    invoke('search_github', { name, token }),
+    invoke('search_sys_pkgmgr', { query: name }),
+  ]);
+
+  let found = false;
+
+  // ── GitHub results ────────────────────────────────────────────────────────
+  const ghList = ghResults.status === 'fulfilled' ? ghResults.value : [];
+  if (ghList.length > 0) {
+    found = true;
+    const list = $('#search-results-list');
+    list.innerHTML = '';
+    ghList.forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'search-result-card';
+      card.innerHTML = `
+        <div class="sr-main">
+          <span class="sr-name">${r.full_name}</span>
+          <span class="sr-stars">★ ${fmtStars(r.stars)}</span>
+        </div>
+        ${r.description ? `<div class="sr-desc">${r.description}</div>` : ''}
+      `;
+      card.addEventListener('click', () => {
+        $('#search-input').value = r.full_name;
+        $('#search-results').style.display = 'none';
+        $('#sys-search-results').style.display = 'none';
+        doRepoSearch(r.full_name);
+      });
+      list.appendChild(card);
+    });
+    $('#search-results').style.display = 'block';
+    log(`:: found ${ghList.length} GitHub repos`, 'info');
+  }
+
+  // ── system pkgmgr results ─────────────────────────────────────────────────
+  const sysList = sysResults.status === 'fulfilled' ? sysResults.value : [];
+  state.sysSearchResults = sysList; // store for auto-install
+  if (sysList.length > 0) {
+    found = true;
+    const list = $('#sys-search-list');
+    list.innerHTML = '';
+    sysList.forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'sys-search-card';
+      card.innerHTML = `
+        <span class="asset-type-badge ${badgeClass(r.manager)}">${r.manager}</span>
+        <div class="sys-card-info">
+          <div class="sys-card-name">${r.name}</div>
+          ${r.description ? `<div class="sys-card-desc">${r.description}</div>` : ''}
+        </div>
+        <button class="btn yellow" style="font-size:10px;padding:4px 10px"
+          onclick="installSysPkg('${r.name.replace(/'/g,"\\'")}', '${r.manager}')">install</button>
+      `;
+      list.appendChild(card);
+    });
+    $('#sys-search-results').style.display = 'block';
+    log(`:: found ${sysList.length} system package results`, 'info');
+  } else {
+    log('   no system packages found', 'dim');
+  }
+
+  if (!found) {
+    log(`!! no results found for "${name}"`, 'warn');
+  }
+
+  setStatus(found ? 'ok' : 'error');
+  $('#search-btn').disabled = false;
+}
+
+async function doRepoSearch(repo) {
+  resetSearchUI();
+  log(`:: fetching release info for ${repo}...`, 'info');
+  setStatus('running');
+  $('#search-btn').disabled = true;
+
+  try {
+    // always load fresh settings here to ensure exclusions are current
+    const s = await invoke('load_settings').catch(() => state.settings);
+    state.settings = s || state.settings;
+    const token = state.settings?.github_token || null;
+
+    // fetch release + search sys pkg managers in parallel
+    // use the package-name portion of the repo (e.g. "etcher" from "balena-io/etcher")
+    const pkgName = repo.split('/')[1] || repo;
+    const [releaseResult, sysResult] = await Promise.allSettled([
+      invoke('fetch_release', { repo, token }),
+      invoke('search_sys_pkgmgr', { query: pkgName }),
+    ]);
+
+    if (releaseResult.status === 'rejected') throw releaseResult.reason;
+    const release = releaseResult.value;
+    state.release = release;
+    state.selectedAsset = null;
+    state.sysSearchResults = sysResult.status === 'fulfilled' ? sysResult.value : [];
+
+    if (state.sysSearchResults.length) {
+      log(`   found ${state.sysSearchResults.length} system package match(es) for "${pkgName}"`, 'dim');
+    }
+
+    $('#release-tag').textContent = release.tag;
+    $('#release-repo').textContent = repo + (release.published_at ? `  ·  released ${fmtDate(release.published_at)}` : '');
+    $('#release-info').classList.add('visible');
+
+    // show installed version badge if this repo is already tracked
+    const _ibOld = document.getElementById('installed-version-badge');
+    if (_ibOld) _ibOld.remove();
+    const _allInst = await invoke('load_installed').catch(() => []);
+    const _instPkg = _allInst.find(p => p.repo === repo);
+    if (_instPkg) {
+      const badge = document.createElement('span');
+      badge.id = 'installed-version-badge';
+      badge.className = 'installed-version-indicator';
+      badge.style.cssText = 'margin-top:6px;display:inline-block';
+      badge.textContent = `✓ ${_instPkg.version} installed`;
+      $('#release-info').appendChild(badge);
+    }
+
+    renderAssets(release.assets, state.settings);
+    log(`:: found ${release.assets.length} assets for ${release.tag}`, 'info');
+    setStatus('ok');
+  } catch (e) {
+    log(`!! ERROR: ${e}`, 'err');
+    setStatus('error');
+  } finally {
+    $('#search-btn').disabled = false;
+  }
+}
+
+async function doSearch() {
+  const raw = $('#search-input').value.trim();
+  if (!raw) return;
+
+  if (!raw.includes('/') && !raw.startsWith('http')) {
+    await doNameSearch(raw);
+    return;
+  }
+
+  let repo = raw;
+  if (raw.startsWith('https://github.com/')) {
+    repo = raw.replace('https://github.com/', '').split('/').slice(0, 2).join('/');
+  }
+  await doRepoSearch(repo);
+}
+
+$('#search-btn').addEventListener('click', doSearch);
+$('#search-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+$('#search-input').addEventListener('input', resetSearchUI);
+
+// ── install via system pkgmgr ──────────────────────────────────────────────
+window.installSysPkg = async (name, manager) => {
+  log(`:: installing ${name} via ${manager}...`, 'info');
+  setStatus('running');
+  // switch to install tab to show log
+  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
+  try {
+    const succeeded = await invoke('run_sys_install', { name, manager });
+    if (succeeded) {
+      // track in pkgd managed so it shows up in the installed tab
+      await invoke('record_installed', {
+        pkg: {
+          repo: `${manager}/${name}`,
+          name,
+          version: 'system',
+          asset_type: manager,
+          url: '',
+          date: new Date().toISOString(),
+          date_released: '',
+        }
+      }).catch(() => {});
+    }
+  } catch (e) {
+    log(`!! ERROR: ${e}`, 'err');
+    setStatus('error');
+  }
+};
+
+// ── install / download via GitHub ──────────────────────────────────────────
+async function runInstall(installFlag) {
+  if (!state.release || !state.selectedAsset) return;
+  const asset = state.selectedAsset;
+
+  const args = [];
+  if (installFlag) args.push('-i');
+  args.push(asset.url);
+
+  log(`:: ${installFlag ? 'installing' : 'downloading'} ${asset.name}...`, 'info');
+  setStatus('running');
+  setAllInstallBtns(true);
+
+  try {
+    await invoke('run_pkgd', { args });
+  } catch (e) {
+    log(`!! ERROR: ${e}`, 'err');
+    setStatus('error');
+    setAllInstallBtns(false);
+  }
+}
+
+async function autoInstall() {
+  const raw = $('#search-input').value.trim();
+  if (!raw) { log('!! type a package name first', 'warn'); return; }
+
+  const s        = await invoke('load_settings').catch(() => state.settings);
+  state.settings = s || state.settings;
+  const priority = (s?.priority) || [];
+  const excluded = new Set(s?.excluded_types || []);
+  const token    = s?.github_token || null;
+  const os       = state.osInfo.os;
+  const arch     = state.osInfo.arch;
+  const SYS_MANAGERS = new Set(['apt', 'flatpak', 'snap', 'dnf', 'pacman']);
+
+  log(`:: auto-install "${raw}" — searching all sources...`, 'info');
+  setStatus('running');
+  setAllInstallBtns(true);
+
+  // If we already have a release loaded for this input, use it;
+  // otherwise search GitHub for the best repo match
+  let release = state.release;
+  let sysResults = state.sysSearchResults || [];
+
+  // Always re-search if input changed or no release loaded
+  const currentRepo = $('#release-repo').textContent.split('·')[0].trim();
+  if (!release || !currentRepo.toLowerCase().includes(raw.toLowerCase().split('/').pop())) {
+    const pkgName = raw.includes('/') ? raw.split('/')[1] : raw;
+    const [ghRes, sysRes] = await Promise.allSettled([
+      raw.includes('/') || raw.startsWith('http')
+        ? invoke('fetch_release', { repo: raw.replace(/^https?:\/\/github\.com\//, ''), token })
+        : invoke('search_github', { name: raw, token }).then(async repos => {
+            if (!repos.length) return null;
+            // pick the top result and load its release
+            const top = repos[0];
+            $('#search-input').value = top.full_name;
+            return invoke('fetch_release', { repo: top.full_name, token });
+          }),
+      invoke('search_sys_pkgmgr', { query: pkgName }),
+    ]);
+
+    if (ghRes.status === 'fulfilled' && ghRes.value) {
+      release = ghRes.value;
+      state.release = release;
+      state.selectedAsset = null;
+      // don't show GH panel yet — only show it if we actually pick a GH asset
+    }
+    sysResults = sysRes.status === 'fulfilled' ? sysRes.value : [];
+    state.sysSearchResults = sysResults;
+  }
+
+  // Filter + sort GitHub assets
+  const filteredAssets = (release?.assets || [])
+    .filter(a => !excluded.has(a.asset_type) && isOsCompatible(a.name, os) && isArchCompatible(a.name, arch));
+  filteredAssets.sort((a, b) => {
+    const ai = priority.indexOf(a.asset_type);
+    const bi = priority.indexOf(b.asset_type);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
+
+  // Build manager → best sys result map
+  const sysMap = {};
+  for (const r of sysResults) {
+    if (!sysMap[r.manager]) sysMap[r.manager] = r;
+  }
+
+  log('   walking priority list...', 'dim');
+
+  // Walk priority — first hit wins
+  for (const ptype of priority) {
+    if (excluded.has(ptype)) continue;
+    if (SYS_MANAGERS.has(ptype)) {
+      if (sysMap[ptype]) {
+        const r = sysMap[ptype];
+        log(`   → ${ptype}: "${r.name}"`, 'dim');
+        setAllInstallBtns(false);
+        // using sys manager — keep GH panel hidden
+        $('#release-info').classList.remove('visible');
+        $('#assets-section').style.display = 'none';
+        await installSysPkg(r.name, ptype);
+        return;
+      }
+    } else {
+      const asset = filteredAssets.find(a => a.asset_type === ptype);
+      if (asset) {
+        state.selectedAsset = asset;
+        log(`   → github: ${asset.name} (${ptype})`, 'dim');
+        // now show GH panel since we're using a GitHub asset
+        if (release) {
+          renderAssets(release.assets, state.settings);
+          $('#release-tag').textContent = release.tag;
+          $('#release-repo').textContent = raw;
+          $('#release-info').classList.add('visible');
+        }
+        setAllInstallBtns(false);
+        await runInstall(true);
+        return;
+      }
+    }
+  }
+
+  // Fallback
+  setAllInstallBtns(false);
+  if (filteredAssets.length) {
+    state.selectedAsset = filteredAssets[0];
+    log(`   → fallback: ${filteredAssets[0].name}`, 'dim');
+    if (release) {
+      renderAssets(release.assets, state.settings);
+      $('#release-tag').textContent = release.tag;
+      $('#release-repo').textContent = raw;
+      $('#release-info').classList.add('visible');
+    }
+    await runInstall(true);
+  } else if (Object.keys(sysMap).length) {
+    const mgr = Object.keys(sysMap)[0];
+    $('#release-info').classList.remove('visible');
+    $('#assets-section').style.display = 'none';
+    await installSysPkg(sysMap[mgr].name, mgr);
+  } else {
+    log('!! nothing found — try a more specific name or load the repo manually', 'warn');
+    setStatus('error');
+  }
+}
+
+$('#install-btn').addEventListener('click', () => runInstall(true));
+$('#download-btn').addEventListener('click', () => runInstall(false));
+$('#auto-install-btn').addEventListener('click', autoInstall);
+
+// ── pkgd log events ────────────────────────────────────────────────────────
+listen('pkgd-log', e => { log(e.payload); });
+listen('pkgd-done', e => {
+  const ok = e.payload === 'ok';
+  setStatus(ok ? 'ok' : 'error');
+  log(ok ? ':: done: complete.' : '!! ERROR: failed.', ok ? 'done' : 'err');
+  setAllInstallBtns(false);
+  if (ok) setTimeout(() => {
+    if (document.querySelector('#tab-installed.active')) loadInstalled();
+  }, 500);
+});
+
+$('#clear-log-btn').addEventListener('click', () => {
+  $('#log-output').innerHTML = '<div class="log-line dim">cleared.</div>';
+  setStatus('');
+});
+
+// ── installed tab — pkgd packages ──────────────────────────────────────────
+async function loadInstalled() {
+  const grid = $('#pkg-grid');
+  const pkgs = await invoke('load_installed').catch(() => []);
+
+  if (!pkgs.length) {
+    grid.innerHTML = '<div class="empty-state">no packages installed via pkgd yet.</div>';
+  } else {
+    grid.innerHTML = '';
+    // render with "checking..." immediately — no "check" button
+    pkgs.forEach(pkg => {
+      grid.appendChild(makePkgRow(pkg));
+    });
+    // auto-check all updates immediately (no user action needed)
+    checkAllUpdates(pkgs);
+  }
+
+  // detected packages — always load (user-installed not tracked by pkgd)
+  loadDetectedPackages();
+
+  // os base packages — hidden by default — only reload if the user has toggled them on
+  if (_sysPkgsVisible) loadSystemPackages();
+}
+
+function makePkgRow(pkg) {
+  const card = document.createElement('div');
+  card.className = 'pkg-card';
+  const safeId = (pkg.repo || '').replace(/\//g, '--').replace(/[^a-zA-Z0-9\-]/g, '');
+  card.id = `pkg-${safeId}`;
+  card.dataset.locked = pkg.locked ? '1' : '';
+
+  const displayName = pkg.name || (pkg.repo || '').split('/')[1] || '?';
+  const typeStr     = pkg.asset_type || 'unknown';
+  const installDate = fmtDate(pkg.date);
+  const safeRepo    = (pkg.repo || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const safeType    = typeStr.replace(/'/g, "\\'");
+
+  card.innerHTML = `
+    <div class="pkg-card-left">
+      <span class="pkg-name">${displayName}</span>
+      <span class="pkg-repo-label">${pkg.repo}</span>
+    </div>
+    <div class="pkg-card-right">
+      <div class="pkg-card-top-row">
+        <span class="asset-type-badge ${badgeClass(typeStr)}">${typeStr}</span>
+        <span class="pkg-card-version">${pkg.version}</span>
+        <span class="pkg-update-inline" id="ua-${safeId}">···</span>
+      </div>
+      ${installDate ? `<span class="pkg-card-date">installed ${installDate}</span>` : ''}
+    </div>
+    <button class="pkg-controls-btn" onclick="openFlyout(this,'${safeRepo}','${safeType}','${safeId}')">⋮</button>
+  `;
+  return card;
+}
+
+// Parse a repo string like "apt/brave-browser" → { manager: "apt", name: "brave-browser" }
+// or a GitHub repo "owner/name" → { manager: null, name: "owner/name" }
+function parseRepo(repo, manager) {
+  const SYS = new Set(['apt','flatpak','snap','appimage','dnf','pacman']);
+  const mgr = manager || '';
+  if (SYS.has(mgr)) return { manager: mgr, name: repo.includes('/') ? repo.split('/').slice(1).join('/') : repo };
+  const slash = repo.indexOf('/');
+  if (slash !== -1) {
+    const prefix = repo.slice(0, slash);
+    if (SYS.has(prefix)) return { manager: prefix, name: repo.slice(slash + 1) };
+  }
+  return { manager: null, name: repo };
+}
+
+// auto-check all pkgd packages for updates (no user action needed)
+async function checkAllUpdates(pkgs) {
+  if (!pkgs) pkgs = await invoke('load_installed').catch(() => []);
+  const s = await invoke('load_settings').catch(() => state.settings);
+  state.settings = s || state.settings;
+  const token = state.settings?.github_token || null;
+
+  for (const pkg of pkgs) {
+    const safeId = pkg.repo.replace(/\//g, '--').replace(/[^a-zA-Z0-9\-]/g, '');
+    const area = document.getElementById(`ua-${safeId}`);
+    if (!area) continue;
+
+    // locked packages — skip update check, show lock indicator
+    if (pkg.locked) {
+      area.textContent = '🔒';
+      area.style.color = 'var(--yellow)';
+      state.updateStatuses[pkg.repo] = { has_update: false, latest: null };
+      continue;
+    }
+
+    // sys-managed packages have no GitHub release to check
+    const { manager: mgr } = parseRepo(pkg.repo, pkg.asset_type);
+    if (mgr) {
+      area.textContent = '';  // empty → hidden via :empty CSS
+      state.updateStatuses[pkg.repo] = { has_update: false, latest: null };
+      continue;
+    }
+
+    try {
+      const status = await invoke('check_update', { repo: pkg.repo, currentVersion: pkg.version, token });
+      state.updateStatuses[pkg.repo] = status;
+      if (status.has_update) {
+        area.textContent = `↑ ${status.latest}`;
+        area.style.color = '';  // inherit .pkg-update-inline yellow
+      } else {
+        area.textContent = '';  // no update — hide via :empty CSS
+      }
+    } catch {
+      area.textContent = '!';
+      area.style.color = 'var(--red)';
+    }
+  }
+}
+
+async function updateAll() {
+  const pkgs = await invoke('load_installed').catch(() => []);
+  const toUpdate = pkgs.filter(p => state.updateStatuses[p.repo]?.has_update);
+  if (!toUpdate.length) {
+    log(':: all packages up to date.', 'done');
+    return;
+  }
+  log(`:: updating ${toUpdate.length} package(s)...`, 'info');
+  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
+  for (const pkg of toUpdate) {
+    await updatePkg(pkg.repo, pkg.asset_type);
+  }
+}
+
+window.toggleLock = async (repo, safeId) => {
+  try {
+    const newLocked = await invoke('toggle_pkg_lock', { repo });
+    const card = document.getElementById(`pkg-${safeId}`);
+    if (card) card.dataset.locked = newLocked ? '1' : '';
+    const area = document.getElementById(`ua-${safeId}`);
+    if (area) {
+      if (newLocked) {
+        area.textContent = '🔒';
+        area.style.color = 'var(--yellow)';
+        state.updateStatuses[repo] = { has_update: false, latest: null };
+      } else {
+        area.textContent = '···';
+        area.style.color = '';
+        const fresh = await invoke('load_installed').catch(() => []);
+        const pkg   = fresh.find(p => p.repo === repo);
+        if (pkg) checkAllUpdates([pkg]);
+      }
+    }
+    log(`:: ${repo} ${newLocked ? 'locked' : 'unlocked'}.`, 'info');
+  } catch (e) {
+    log(`!! could not toggle lock: ${e}`, 'err');
+  }
+};
+
+window.updatePkg = async (repo, manager) => {
+  const { manager: mgr, name } = parseRepo(repo, manager);
+  log(`:: updating ${name}${mgr ? ` (${mgr})` : ''}...`, 'info');
+  setStatus('running');
+  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
+  try {
+    if (mgr) {
+      await invoke('run_sys_install', { name, manager: mgr });
+    } else {
+      await invoke('run_pkgd', { args: ['-i', repo] });
+    }
+  } catch (e) {
+    log(`!! ERROR: ${e}`, 'err');
+    setStatus('error');
+  }
+};
+
+// ── global flyout ──────────────────────────────────────────────────────────
+const _flyout = document.createElement('div');
+_flyout.id = '_gflyout';
+document.body.appendChild(_flyout);
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#_gflyout') && !e.target.closest('.pkg-controls-btn')) {
+    closeFlyout();
+  }
+});
+
+window.closeFlyout = () => {
+  _flyout.classList.remove('open');
+  _flyout.innerHTML = '';
+  delete _flyout.dataset.forId;
+};
+
+window.openFlyout = (btn, repo, typeStr, safeId) => {
+  // toggle closed if already open for this card
+  if (_flyout.dataset.forId === safeId && _flyout.classList.contains('open')) {
+    closeFlyout();
+    return;
+  }
+  _flyout.dataset.forId = safeId;
+  _flyout.innerHTML = '';
+
+  const card      = document.getElementById(`pkg-${safeId}`);
+  const isLocked  = card?.dataset.locked === '1';
+  const updStatus = state.updateStatuses[repo];
+
+  const addItem = (label, cls, action) => {
+    const el = document.createElement('button');
+    el.className = `flyout-item${cls ? ' ' + cls : ''}`;
+    el.textContent = label;
+    el.addEventListener('click', () => { closeFlyout(); action(); });
+    _flyout.appendChild(el);
+  };
+  const addSep = () => {
+    const hr = document.createElement('hr');
+    hr.className = 'flyout-sep';
+    _flyout.appendChild(hr);
+  };
+
+  addItem('▶  launch / manage', '',       () => launchPkg(repo, typeStr));
+  addItem('✕  remove',          'danger', () => removePkg(repo, typeStr));
+  addItem('⋯  dependencies',    '',       () => showDeps(repo, typeStr));
+
+  addSep();
+
+  if (updStatus?.has_update) {
+    addItem(`↑  update to ${updStatus.latest}`, 'success', () => updatePkg(repo, typeStr));
+  }
+
+  addItem(isLocked ? '🔓  unlock version' : '🔒  lock version', 'locked',
+    () => toggleLock(repo, safeId));
+
+  // position flyout near the button
+  _flyout.classList.add('open');
+  const fw   = _flyout.offsetWidth;
+  const fh   = _flyout.offsetHeight;
+  const rect = btn.getBoundingClientRect();
+  let top  = rect.bottom + 4;
+  let left = rect.right - fw;
+  if (left < 8) left = 8;
+  if (top + fh > window.innerHeight - 8) top = rect.top - fh - 4;
+  _flyout.style.top  = `${top}px`;
+  _flyout.style.left = `${left}px`;
+};
+
+window.removePkg = async (repo, manager) => {
+  const { manager: mgr, name } = parseRepo(repo, manager);
+  log(`:: removing ${name}${mgr ? ` (${mgr})` : ''}...`, 'warn');
+  setStatus('running');
+  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
+  try {
+    if (mgr) {
+      await invoke('run_sys_remove', { name, manager: mgr });
+    } else {
+      await invoke('run_pkgd', { args: ['remove', repo] });
+    }
+  } catch (e) {
+    log(`!! ERROR: ${e}`, 'err');
+    setStatus('error');
+  }
+};
+
+const SYS_MANAGERS = new Set(['apt', 'flatpak', 'snap', 'appimage', 'deb', 'dnf', 'pacman', 'rpm']);
+
+window.launchPkg = async (repo, manager) => {
+  // sys-managed packages: repo is like "apt/brave-browser" or manager is known
+  const mgr = manager || repo.split('/')[0];
+  const name = repo.includes('/') ? repo.split('/').slice(1).join('/') : repo;
+
+  log(`:: launching ${name} (${mgr})...`, 'info');
+  setStatus('running');
+  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
+  try {
+    if (SYS_MANAGERS.has(mgr) && mgr !== 'deb') {
+      await invoke('launch_sys_pkg', { name, manager: mgr });
+    } else {
+      await invoke('run_pkgd', { args: ['launch', repo] });
+    }
+  } catch (e) {
+    log(`!! ERROR: ${e}`, 'err');
+    setStatus('error');
+  }
+};
+
+window.showDeps = async (repo, manager) => {
+  const mgr = manager || repo.split('/')[0];
+  const name = repo.includes('/') ? repo.split('/').slice(1).join('/') : repo;
+
+  try {
+    const deps = await invoke('get_pkg_deps', { name, manager: mgr });
+    if (!deps.length) {
+      log(`   ${name}: no tracked dependencies found`, 'dim');
+      return;
+    }
+    log(`   ${name} dependencies (${deps.length}):`, 'dim');
+    deps.forEach(d => log(`     · ${d}`, 'dim'));
+  } catch (e) {
+    log(`!! could not fetch deps for ${name}: ${e}`, 'err');
+  }
+};
+
+// ── installed tab — detected packages (user-installed, not tracked by pkgd) ─
+async function loadDetectedPackages() {
+  const section = $('#detected-section');
+  const divider = $('#detected-divider');
+  const grid    = $('#detected-pkg-grid');
+
+  grid.innerHTML = '<div class="empty-state" style="padding:20px">scanning…</div>';
+
+  try {
+    const pkgs = await invoke('scan_user_packages');
+    state.allDetectedPkgs = pkgs;
+
+    if (!pkgs.length) {
+      section.style.display = 'none';
+      divider.style.display = 'none';
+      return;
+    }
+
+    section.style.display = 'block';
+    divider.style.display = 'block';
+    renderDetectedPackages(pkgs);
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state" style="padding:20px;color:var(--text3)">could not scan: ${e}</div>`;
+    section.style.display = 'block';
+    divider.style.display = 'block';
+  }
+  // always load deps section alongside detected
+  loadDepPackages();
+}
+
+// ── installed tab — dependencies (auto-installed apt deps) ─────────────────
+async function loadDepPackages() {
+  const section = $('#dep-section');
+  const divider = $('#dep-divider');
+
+  try {
+    const pkgs = await invoke('scan_dep_packages');
+    state.allDepPkgs = pkgs;
+
+    if (!pkgs.length) {
+      section.style.display = 'none';
+      divider.style.display = 'none';
+      return;
+    }
+
+    section.style.display = 'block';
+    divider.style.display = 'block';
+
+    // update count even when body is collapsed
+    const countEl = $('#dep-pkg-count');
+    if (countEl) countEl.textContent = `${pkgs.length} packages`;
+  } catch (e) {
+    // silently ignore — deps section is optional
+  }
+}
+
+window.toggleDepSection = () => {
+  const body = $('#dep-body');
+  const btn  = $('#toggle-dep-btn');
+  const open = body.style.display === 'block';
+  body.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? 'show' : 'hide';
+  if (!open && state.allDepPkgs.length) {
+    renderDepPackages(state.allDepPkgs);
+  }
+};
+
+function renderDepPackages(pkgs) {
+  const countEl = $('#dep-pkg-count');
+  if (countEl) countEl.textContent = `${pkgs.length} packages`;
+
+  const letterMap = {};
+  pkgs.forEach(p => {
+    const first = (p.name[0] || '').toLowerCase();
+    const key   = /[a-z]/.test(first) ? first : '#';
+    (letterMap[key] = letterMap[key] || []).push(p);
+  });
+  Object.values(letterMap).forEach(arr => arr.sort((a, b) => a.name.localeCompare(b.name)));
+
+  const allLetters = '#abcdefghijklmnopqrstuvwxyz'.split('');
+  const available  = allLetters.filter(l => letterMap[l]);
+
+  if (!available.includes(state.depActiveLetter)) {
+    state.depActiveLetter = available[0] || '';
+  }
+
+  const tabBar = $('#dep-alpha-tabs');
+  tabBar.innerHTML = '';
+  available.forEach(letter => {
+    const btn = document.createElement('button');
+    btn.className = 'alpha-tab' + (letter === state.depActiveLetter ? ' active' : '');
+    btn.textContent = letter === '#' ? '#' : letter.toUpperCase();
+    btn.dataset.letter = letter;
+    btn.addEventListener('click', () => {
+      state.depActiveLetter = letter;
+      tabBar.querySelectorAll('.alpha-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderDepByLetter(letterMap, letter);
+    });
+    tabBar.appendChild(btn);
+  });
+
+  renderDepByLetter(letterMap, state.depActiveLetter);
+}
+
+function renderDepByLetter(letterMap, letter) {
+  const grid = $('#dep-pkg-grid');
+  grid.innerHTML = '';
+  const pkgs = letterMap[letter] || [];
+
+  if (!pkgs.length) {
+    grid.innerHTML = '<div class="empty-state" style="padding:20px">nothing here.</div>';
+    return;
+  }
+
+  pkgs.forEach(pkg => {
+    const row = document.createElement('div');
+    row.className = 'pkg-row';
+    row.style.padding = '8px 14px';
+    const safeName = pkg.name.replace(/'/g, "\\'");
+    const safeMgr  = pkg.manager.replace(/'/g, "\\'");
+    const safeVer  = pkg.version.replace(/'/g, "\\'");
+    row.innerHTML = `
+      <div class="pkg-info">
+        <span class="pkg-name" style="font-size:12px;color:var(--text2)">${pkg.name}</span>
+        ${pkg.description ? `<span class="pkg-repo-label">${pkg.description.slice(0, 80)}</span>` : ''}
+      </div>
+      <span class="asset-type-badge ${badgeClass(pkg.manager)}">${pkg.manager}</span>
+      <span class="pkg-version" style="font-size:10px">${pkg.version}</span>
+      <div class="pkg-actions">
+        <button class="btn primary" style="font-size:10px;padding:3px 9px"
+          onclick="managePkg('${safeName}', '${safeMgr}', '${safeVer}')">manage</button>
+        <button class="btn danger" style="font-size:10px;padding:3px 9px"
+          onclick="removeSysPkg('${safeName}', '${safeMgr}')">remove</button>
+      </div>
+    `;
+    grid.appendChild(row);
+  });
+}
+
+function renderDetectedPackages(pkgs) {
+  const countEl = $('#detected-pkg-count');
+  if (countEl) countEl.textContent = `${pkgs.length} packages`;
+
+  const letterMap = {};
+  pkgs.forEach(p => {
+    const first = (p.name[0] || '').toLowerCase();
+    const key   = /[a-z]/.test(first) ? first : '#';
+    (letterMap[key] = letterMap[key] || []).push(p);
+  });
+  Object.values(letterMap).forEach(arr => arr.sort((a, b) => a.name.localeCompare(b.name)));
+
+  const allLetters = '#abcdefghijklmnopqrstuvwxyz'.split('');
+  const available  = allLetters.filter(l => letterMap[l]);
+
+  if (!available.includes(state.detectedActiveLetter)) {
+    state.detectedActiveLetter = available[0] || '';
+  }
+
+  const tabBar = $('#detected-alpha-tabs');
+  tabBar.innerHTML = '';
+  available.forEach(letter => {
+    const btn = document.createElement('button');
+    btn.className = 'alpha-tab' + (letter === state.detectedActiveLetter ? ' active' : '');
+    btn.textContent = letter === '#' ? '#' : letter.toUpperCase();
+    btn.dataset.letter = letter;
+    btn.addEventListener('click', () => {
+      state.detectedActiveLetter = letter;
+      // only toggle tabs inside detected-alpha-tabs
+      tabBar.querySelectorAll('.alpha-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderDetectedByLetter(letterMap, letter);
+    });
+    tabBar.appendChild(btn);
+  });
+
+  renderDetectedByLetter(letterMap, state.detectedActiveLetter);
+}
+
+function renderDetectedByLetter(letterMap, letter) {
+  const grid = $('#detected-pkg-grid');
+  grid.innerHTML = '';
+  const pkgs = letterMap[letter] || [];
+
+  if (!pkgs.length) {
+    grid.innerHTML = '<div class="empty-state" style="padding:20px">nothing here.</div>';
+    return;
+  }
+
+  pkgs.forEach(pkg => {
+    const row = document.createElement('div');
+    row.className = 'pkg-row';
+    row.style.padding = '8px 14px';
+    const safeName = pkg.name.replace(/'/g, "\\'");
+    const safeMgr  = pkg.manager.replace(/'/g, "\\'");
+    const safeVer  = pkg.version.replace(/'/g, "\\'");
+    row.id = `det-${pkg.manager}-${pkg.name}`.replace(/[^a-zA-Z0-9\-]/g, '-');
+    row.innerHTML = `
+      <div class="pkg-info">
+        <span class="pkg-name" style="font-size:12px">${pkg.name}</span>
+        ${pkg.description ? `<span class="pkg-repo-label">${pkg.description.slice(0, 80)}</span>` : ''}
+      </div>
+      <span class="asset-type-badge ${badgeClass(pkg.manager)}">${pkg.manager}</span>
+      <span class="pkg-version" style="font-size:10px">${pkg.version}</span>
+      <div class="pkg-actions">
+        <button class="btn primary" style="font-size:10px;padding:3px 9px"
+          onclick="managePkg('${safeName}', '${safeMgr}', '${safeVer}')">manage</button>
+        <button class="btn danger" style="font-size:10px;padding:3px 9px"
+          onclick="removeSysPkg('${safeName}', '${safeMgr}')">remove</button>
+      </div>
+    `;
+    grid.appendChild(row);
+  });
+}
+
+// Move a detected package into pkgd managed (adds to installed.json, reloads)
+window.managePkg = async (name, manager, version) => {
+  log(`:: tracking ${name} (${manager}) as pkgd managed...`, 'info');
+  try {
+    await invoke('record_installed', { pkg: {
+      repo:          `${manager}/${name}`,
+      name,
+      version:       version || 'system',
+      asset_type:    manager,
+      url:           '',
+      date:          new Date().toISOString(),
+      date_released: '',
+    }});
+    log(`:: ${name} moved to pkgd managed.`, 'ok');
+    // reload both sections so package moves from detected → managed
+    loadInstalled();
+  } catch (e) {
+    log(`!! could not track ${name}: ${e}`, 'err');
+  }
+};
+
+// ── installed tab — system packages ───────────────────────────────────────
+// OS packages are hidden by default — user must toggle them on (use at your own risk)
+let _sysPkgsVisible = false;
+
+window.toggleSysPkgs = async () => {
+  _sysPkgsVisible = !_sysPkgsVisible;
+  const showRow = $('#show-os-row');
+  const section = $('#sys-pkgs-section');
+  const divider = $('#sys-pkgs-divider');
+
+  if (_sysPkgsVisible) {
+    if (showRow) showRow.style.display = 'none';
+    if (!state.allSysPkgs.length) {
+      await loadSystemPackages();
+    } else {
+      section.style.display = 'block';
+      divider.style.display = 'block';
+    }
+  } else {
+    if (showRow) showRow.style.display = 'flex';
+    section.style.display = 'none';
+    divider.style.display = 'none';
+  }
+};
+
+async function loadSystemPackages() {
+  const section = $('#sys-pkgs-section');
+  const divider = $('#sys-pkgs-divider');
+  const grid    = $('#sys-pkg-grid');
+
+  grid.innerHTML = '<div class="empty-state" style="padding:20px">loading system packages…</div>';
+  section.style.display = 'block';
+  divider.style.display = 'block';
+
+  try {
+    const pkgs = await invoke('scan_system_packages');
+    state.allSysPkgs = pkgs;
+
+    if (!pkgs.length) {
+      grid.innerHTML = '<div class="empty-state" style="padding:20px">no system packages found.</div>';
+      return;
+    }
+
+    renderSysPackages(pkgs);
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state" style="padding:20px;color:var(--text3)">could not scan: ${e}</div>`;
+  }
+}
+
+// ── sys packages — alphabetical tab navigation ─────────────────────────────
+function renderSysPackages(pkgs) {
+  // update count
+  const countEl = $('#sys-pkg-count');
+  if (countEl) countEl.textContent = `${pkgs.length} packages`;
+
+  // build a map: letter → sorted packages
+  const letterMap = {};
+  pkgs.forEach(p => {
+    const first = (p.name[0] || '').toLowerCase();
+    const key   = /[a-z]/.test(first) ? first : '#';
+    (letterMap[key] = letterMap[key] || []).push(p);
+  });
+
+  // sort each bucket alphabetically by name
+  Object.values(letterMap).forEach(arr => arr.sort((a, b) => a.name.localeCompare(b.name)));
+
+  // build sorted tab list: # first if present, then a-z
+  const allLetters = '#abcdefghijklmnopqrstuvwxyz'.split('');
+  const available  = allLetters.filter(l => letterMap[l]);
+
+  // default to first available letter if current selection gone
+  if (!available.includes(state.sysActiveLetter)) {
+    state.sysActiveLetter = available[0] || '';
+  }
+
+  // render tab buttons
+  const tabBar = $('#sys-alpha-tabs');
+  tabBar.innerHTML = '';
+  available.forEach(letter => {
+    const btn = document.createElement('button');
+    btn.className = 'alpha-tab' + (letter === state.sysActiveLetter ? ' active' : '');
+    btn.textContent = letter === '#' ? '#' : letter.toUpperCase();
+    btn.dataset.letter = letter;
+    btn.addEventListener('click', () => {
+      state.sysActiveLetter = letter;
+      tabBar.querySelectorAll('.alpha-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderSysByLetter(letterMap, letter);
+    });
+    tabBar.appendChild(btn);
+  });
+
+  // render active letter's packages
+  renderSysByLetter(letterMap, state.sysActiveLetter);
+}
+
+function renderSysByLetter(letterMap, letter) {
+  const grid = $('#sys-pkg-grid');
+  grid.innerHTML = '';
+  const pkgs = letterMap[letter] || [];
+
+  if (!pkgs.length) {
+    grid.innerHTML = `<div class="empty-state" style="padding:20px">nothing here.</div>`;
+    return;
+  }
+
+  pkgs.forEach(pkg => {
+    const row = document.createElement('div');
+    row.className = 'pkg-row';
+    row.style.padding = '8px 14px';
+    const safeId = `sys-${pkg.manager}-${pkg.name}`.replace(/[^a-zA-Z0-9\-]/g, '-');
+    row.innerHTML = `
+      <div class="pkg-info">
+        <span class="pkg-name" style="font-size:12px">${pkg.name}</span>
+        ${pkg.description ? `<span class="pkg-repo-label">${pkg.description.slice(0, 80)}</span>` : ''}
+      </div>
+      <span class="asset-type-badge ${badgeClass(pkg.manager)}">${pkg.manager}</span>
+      <span class="pkg-version" style="font-size:10px">${pkg.version}</span>
+      <div class="pkg-actions">
+        <button class="btn danger" style="font-size:10px;padding:3px 9px"
+          id="${safeId}-rm"
+          onclick="removeSysPkg('${pkg.name.replace(/'/g,"\\'")}', '${pkg.manager}')">remove</button>
+      </div>
+    `;
+    grid.appendChild(row);
+  });
+}
+
+window.removeSysPkg = async (name, manager) => {
+  log(`:: removing ${name} (${manager})...`, 'warn');
+  setStatus('running');
+  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
+  try {
+    await invoke('run_sys_remove', { name, manager });
+  } catch (e) {
+    log(`!! ERROR: ${e}`, 'err');
+    setStatus('error');
+  }
+};
+
+// (pkgd-done refresh handled by the primary listener above)
+
+// ── settings ──────────────────────────────────────────────────────────────
+// Master list of all possible types (used as fallback / for badge rendering)
+const ALL_TYPES = ['deb', 'rpm', 'appimage', 'tar', 'zip', 'bin', 'dmg', 'win', 'other',
+                   'apt', 'flatpak', 'snap', 'dnf', 'pacman'];
+
+// Returns only the types relevant on the current system:
+// - GitHub asset types: deb only if dpkg present, rpm only if rpm present, always appimage/tar/zip/bin
+// - Sys manager types: only those actually installed (no dnf/pacman on Debian, no apt on Arch, etc.)
+function relevantTypes() {
+  const mgrs = state.pkgManagers || [];
+  const types = [];
+  // native package format for this distro
+  if (mgrs.includes('dpkg')) types.push('deb');
+  if (mgrs.includes('rpm'))  types.push('rpm');
+  // universal binary formats — always shown on Linux
+  types.push('appimage', 'tar', 'zip', 'bin');
+  // other (checksums/sigs) — always last, usually toggled off
+  types.push('other');
+  // system package managers — only if actually installed
+  ['apt', 'flatpak', 'snap', 'dnf', 'pacman'].forEach(m => {
+    if (mgrs.includes(m)) types.push(m);
+  });
+  return types;
+}
+
+// auto-save priority/excluded whenever drag or toggle changes (debounced)
+let _prioritySaveTimer = null;
+async function savePriorityNow() {
+  const items    = $$('#priority-list .priority-item');
+  const priority = items.map(el => el.dataset.type);
+  const excluded = items.filter(el => !el.querySelector('.priority-item-toggle').checked).map(el => el.dataset.type);
+  const s = { ...state.settings, priority, excluded_types: excluded };
+  await invoke('save_settings', { settings: s }).catch(() => {});
+  state.settings = s;
+}
+function schedPrioritySave() {
+  if (_prioritySaveTimer) clearTimeout(_prioritySaveTimer);
+  _prioritySaveTimer = setTimeout(savePriorityNow, 350);
+}
+
+async function loadSettings() {
+  const s = await invoke('load_settings').catch(() => null);
+  state.settings = s || {
+    priority: ['deb', 'appimage', 'tar', 'zip', 'bin', 'apt', 'flatpak', 'snap', 'dnf', 'pacman'],
+    excluded_types: ['other', 'win'],
+    github_token: '',
+    install_dir: '',
+  };
+  renderPriorityList();
+  $('#github-token').value = state.settings.github_token || '';
+  $('#install-dir').value  = state.settings.install_dir  || '';
+}
+
+function renderPriorityList() {
+  const s        = state.settings;
+  const excluded = new Set(s.excluded_types || []);
+  const prio     = s.priority || [];
+  // Only show types that are relevant on THIS system (distro-aware)
+  const relevant = relevantTypes();
+  const missing  = relevant.filter(t => !prio.includes(t));
+  // Filter out types not relevant on this distro (e.g. no rpm on Debian, no apt on Arch)
+  const order    = [...prio.filter(t => relevant.includes(t)), ...missing];
+
+  const list = $('#priority-list');
+  list.innerHTML = '';
+
+  order.forEach(type => {
+    const item = document.createElement('div');
+    item.className = 'priority-item';
+    item.dataset.type = type;
+    // NOTE: no draggable=true — we use pointer events instead (HTML5 DnD is unreliable in WebKit WebViews)
+    const isEnabled = !excluded.has(type);
+    item.innerHTML = `
+      <span class="drag-handle">⠿</span>
+      <span class="asset-type-badge ${badgeClass(type)}">${type}</span>
+      <span class="priority-item-name">${type}</span>
+      <input type="checkbox" class="priority-item-toggle" ${isEnabled ? 'checked' : ''} />
+    `;
+    list.appendChild(item);
+    item.querySelector('.priority-item-toggle').addEventListener('change', schedPrioritySave);
+  });
+
+  // ── pointer-events drag-to-sort (works in Tauri/WebKit) ───────────────────
+  let dragEl = null, dragClone = null, dragOffsetY = 0;
+
+  list.addEventListener('pointerdown', e => {
+    if (!e.target.closest('.drag-handle')) return;
+    dragEl = e.target.closest('.priority-item');
+    if (!dragEl) return;
+    e.preventDefault();
+
+    const rect = dragEl.getBoundingClientRect();
+    dragOffsetY = e.clientY - rect.top;
+
+    // floating ghost that follows the pointer
+    dragClone = dragEl.cloneNode(true);
+    dragClone.style.cssText = [
+      'position:fixed',
+      `left:${rect.left}px`, `top:${rect.top}px`, `width:${rect.width}px`,
+      'opacity:0.88', 'pointer-events:none', 'z-index:9999',
+      'background:var(--bg3)', 'border:1px solid var(--lilac)',
+      'border-radius:var(--radius)', 'box-shadow:0 6px 24px rgba(0,0,0,0.5)',
+    ].join(';');
+    document.body.appendChild(dragClone);
+    dragEl.style.opacity = '0.2';
+
+    list.setPointerCapture(e.pointerId);
+  });
+
+  list.addEventListener('pointermove', e => {
+    if (!dragEl || !dragClone) return;
+    e.preventDefault();
+    dragClone.style.top = `${e.clientY - dragOffsetY}px`;
+
+    // live-reorder dragEl in DOM by scanning sibling midpoints
+    const siblings = [...list.querySelectorAll('.priority-item')].filter(el => el !== dragEl);
+    let placed = false;
+    for (const sib of siblings) {
+      if (e.clientY < sib.getBoundingClientRect().top + sib.getBoundingClientRect().height / 2) {
+        list.insertBefore(dragEl, sib);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) list.appendChild(dragEl);
+  });
+
+  const endDrag = () => {
+    if (!dragEl) return;
+    if (dragClone) { dragClone.remove(); dragClone = null; }
+    dragEl.style.opacity = '';
+    dragEl = null;
+    schedPrioritySave();
+  };
+
+  list.addEventListener('pointerup', endDrag);
+  list.addEventListener('pointercancel', endDrag);
+}
+
+function collectSettings() {
+  const items    = $$('#priority-list .priority-item');
+  const priority = items.map(el => el.dataset.type);
+  // excluded = types where toggle is NOT checked
+  const excluded = items
+    .filter(el => !el.querySelector('.priority-item-toggle').checked)
+    .map(el => el.dataset.type);
+  return {
+    priority,
+    excluded_types: excluded,
+    github_token: $('#github-token').value.trim() || null,
+    install_dir:  $('#install-dir').value.trim()  || null,
+  };
+}
+
+$('#save-settings-btn').addEventListener('click', async () => {
+  // save button handles token + dir; priority/excluded are already auto-saved
+  const s = {
+    ...state.settings,
+    github_token: $('#github-token').value.trim() || null,
+    install_dir:  $('#install-dir').value.trim()  || null,
+  };
+  try {
+    await invoke('save_settings', { settings: s });
+    state.settings = s;
+    const status = $('#save-status');
+    status.classList.add('visible');
+    setTimeout(() => status.classList.remove('visible'), 2000);
+  } catch (e) {
+    log(`failed to save settings: ${e}`, 'err');
+  }
+});
+
+// ── init ──────────────────────────────────────────────────────────────────
+loadSettings();
+</script>
+</body>
+</html>
