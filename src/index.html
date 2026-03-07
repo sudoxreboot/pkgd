@@ -755,6 +755,47 @@
     }
     .save-status.visible { opacity: 1; }
 
+    /* ── warning modal ── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      background: rgba(0, 0, 0, 0.72);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-backdrop.hidden { display: none; }
+    .modal-box {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px 30px;
+      max-width: 420px;
+      width: 90%;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+    }
+    .modal-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--yellow);
+    }
+    .modal-body {
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.65;
+    }
+    .modal-body strong { color: var(--red); }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
     /* scrollbar */
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -776,7 +817,7 @@
   <!-- tabs -->
   <div class="tabs">
     <div class="tab active" data-tab="install">install</div>
-    <div class="tab" data-tab="installed">installed</div>
+    <div class="tab" data-tab="manage">manage</div>
     <div class="tab" data-tab="settings">settings</div>
   </div>
 
@@ -847,8 +888,8 @@
     </div>
   </div>
 
-  <!-- ── installed panel ── -->
-  <div class="panel" id="tab-installed">
+  <!-- ── manage panel ── -->
+  <div class="panel" id="tab-manage">
     <div class="installed-panel">
 
       <!-- pkgd managed packages -->
@@ -920,6 +961,23 @@
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- ── os packages warning modal ── -->
+  <div class="modal-backdrop hidden" id="os-warn-modal">
+    <div class="modal-box">
+      <div class="modal-title">⚠ os base packages — use at your own risk</div>
+      <div class="modal-body">
+        OS base packages are critical system components.<br><br>
+        <strong>Removing the wrong package can break your operating system.</strong><br><br>
+        The pkgd developers take <strong>no responsibility</strong> for any damage
+        caused by removing system packages via this interface.
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeOsModal(false)">cancel</button>
+        <button class="btn danger" onclick="closeOsModal(true)">i understand — show anyway</button>
+      </div>
     </div>
   </div>
 
@@ -1091,7 +1149,7 @@ $$('.tab').forEach(tab => {
     $$('.panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     $(`#tab-${tab.dataset.tab}`).classList.add('active');
-    if (tab.dataset.tab === 'installed') loadInstalled();
+    if (tab.dataset.tab === 'manage') loadInstalled();
     if (tab.dataset.tab === 'settings') loadSettings();
   });
 });
@@ -1506,7 +1564,7 @@ listen('pkgd-done', e => {
   log(ok ? ':: done: complete.' : '!! ERROR: failed.', ok ? 'done' : 'err');
   setAllInstallBtns(false);
   if (ok) setTimeout(() => {
-    if (document.querySelector('#tab-installed.active')) loadInstalled();
+    if (document.querySelector('#tab-manage.active')) loadInstalled();
   }, 500);
 });
 
@@ -1815,13 +1873,18 @@ window.removePkg = async (repo, manager) => {
   const { manager: mgr, name } = parseRepo(repo, manager);
   log(`:: removing ${name}${mgr ? ` (${mgr})` : ''}...`, 'warn');
   setStatus('running');
-  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
   try {
     if (mgr) {
+      // sys-managed: uninstall + remove from pkgd db
       await invoke('run_sys_remove', { name, manager: mgr });
+      await invoke('remove_installed', { repo });
     } else {
+      // pkgd-managed: bash script handles db cleanup
       await invoke('run_pkgd', { args: ['remove', repo] });
     }
+    setStatus('ok');
+    log(`:: done: ${name} removed.`, 'done');
+    await loadInstalled(); // refresh manage tab immediately
   } catch (e) {
     log(`!! ERROR: ${e}`, 'err');
     setStatus('error');
@@ -2103,29 +2166,36 @@ window.managePkg = async (name, manager, version) => {
 // OS packages are hidden by default — user must toggle them on (use at your own risk)
 let _sysPkgsVisible = false;
 
-window.toggleSysPkgs = async () => {
-  _sysPkgsVisible = !_sysPkgsVisible;
-  const showRow = $('#show-os-row');
-  const section = $('#sys-pkgs-section');
-  const divider = $('#sys-pkgs-divider');
-
+window.toggleSysPkgs = () => {
   if (_sysPkgsVisible) {
-    if (showRow) showRow.style.display = 'none';
-    // hard warning — switch to install tab so they see it
-    $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
-    log('⚠ WARNING: os base packages are displayed below.', 'warn');
-    log('⚠ The pkgd developers take NO responsibility for damage caused by removing system packages.', 'warn');
-    log('⚠ Removing the wrong package can break your OS. Proceed entirely at your own risk.', 'warn');
-    if (!state.allSysPkgs.length) {
-      await loadSystemPackages();
-    } else {
-      section.style.display = 'block';
-      divider.style.display = 'block';
-    }
-  } else {
+    // already visible — hide immediately, no confirmation needed
+    _sysPkgsVisible = false;
+    const showRow = $('#show-os-row');
+    const section = $('#sys-pkgs-section');
+    const divider = $('#sys-pkgs-divider');
     if (showRow) showRow.style.display = 'flex';
     section.style.display = 'none';
     divider.style.display = 'none';
+  } else {
+    // show warning modal first — user must acknowledge before seeing OS packages
+    $('#os-warn-modal').classList.remove('hidden');
+  }
+};
+
+window.closeOsModal = async (confirmed) => {
+  $('#os-warn-modal').classList.add('hidden');
+  if (!confirmed) return;
+
+  _sysPkgsVisible = true;
+  const showRow = $('#show-os-row');
+  const section = $('#sys-pkgs-section');
+  const divider = $('#sys-pkgs-divider');
+  if (showRow) showRow.style.display = 'none';
+  if (!state.allSysPkgs.length) {
+    await loadSystemPackages();
+  } else {
+    section.style.display = 'block';
+    divider.style.display = 'block';
   }
 };
 

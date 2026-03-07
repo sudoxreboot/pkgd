@@ -941,6 +941,22 @@ fn toggle_pkg_lock(repo: String) -> Result<bool, String> {
     Ok(new_state)
 }
 
+/// Remove a package entry from installed.json by repo key.
+#[tauri::command]
+fn remove_installed(repo: String) -> Result<(), String> {
+    let path = db_path();
+    let pkgs: Vec<InstalledPkg> = if let Ok(data) = std::fs::read_to_string(&path) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        return Ok(()); // nothing to remove
+    };
+    let filtered: Vec<InstalledPkg> = pkgs.into_iter().filter(|p| p.repo != repo).collect();
+    std::fs::create_dir_all(pkgd_dir()).map_err(|e| e.to_string())?;
+    let data = serde_json::to_string_pretty(&filtered).map_err(|e| e.to_string())?;
+    std::fs::write(path, data).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Add or update a package entry in installed.json (used to track sys-manager installs).
 #[tauri::command]
 fn record_installed(pkg: InstalledPkg) -> Result<(), String> {
@@ -1069,6 +1085,7 @@ pub fn run() {
             detect_os,
             detect_pkg_managers,
             toggle_pkg_lock,
+            remove_installed,
             record_installed,
             scan_system_packages,
             scan_user_packages,
