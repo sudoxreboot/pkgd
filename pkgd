@@ -852,6 +852,14 @@ cmd_remove() {
 
   info "removing ${appname} (${asset_type:-unknown})..."
 
+  # warn when removing system-managed packages
+  case "${asset_type:-unknown}" in
+    deb|apt|rpm|dnf|pacman|snap|flatpak)
+      warn "⚠  NOTICE: The pkgd developers are NOT responsible for damage caused by"
+      warn "   removing system-managed packages. Proceed at your own risk."
+      ;;
+  esac
+
   case "${asset_type:-unknown}" in
     deb)
       local pkgname="${name:-$appname}"

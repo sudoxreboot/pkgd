@@ -1,95 +1,105 @@
 # pkgd
+**making linux easier than windows '95**
+pull and install unifier · package manager for simplicity · cli or gui — you pick
 
-**universal release installer for linux (and macos)**  
 by [sudoxreboot](https://github.com/sudoxreboot)
+
+---
+
+<p align="center">
+  <img src="images/screenshot-pkgd-gui.png" alt="pkgd screenshot" width="720"/>
+</p>
 
 ---
 
 ## what it is
 
-pkgd is a shell command + gui app that installs software directly from github releases, gitlab releases, or direct urls — automatically detecting your os/distro/arch and picking the right package type. no hunting release pages, no manual wget, no version pinning.
+pkgd is a shell command + gui app that installs software from github releases, package managers, and direct urls — automatically detecting your os/distro/arch and picking the right package. no hunting release pages, no manual wget, no version pinning. one command.
+
+---
+
+## goals
+
+- [x] simple command to install with url or repo
+  - [x] bonus: search just the app name (i.e. `pkgd -i balenaEtcher`)
+- [x] parse distro you're on
+- [x] pull latest or specific version (i.e. `pkgd raspberrypi/rpi-imager`)
+- [x] install latest or specific version (i.e. `pkgd -i raspberrypi/rpi-imager`)
+- [ ] update
+- [x] ~~uninstall~~ remove
+- [ ] github asset support
+  - [x] .deb
+  - [x] .AppImage
+  - [ ] .rpm
+  - [ ] .tar.gz
+  - [ ] .zip
+- [ ] package managers confirmed to work
+  - [x] apt
+  - [ ] aur
+  - [ ] zypper
+  - [ ] snap
+  - [ ] flatpak
+  - [ ] nix
+  - [ ] portage
+  - [ ] docker
+  - [ ] docker compose
+  - [ ] apk
+- [ ] gitlab
+- [ ] steam
+- [ ] exe upload / proton install
+- [ ] unified and uniform
 
 ---
 
 ## features
 
-- **os-aware** — detects debian/ubuntu/fedora/arch/macos and picks the right package format automatically
+- **os-aware** — detects debian/ubuntu/fedora/arch/macos, picks the right package format
 - **arch-aware** — handles x86_64, arm64, armhf
-- **multi-source** — github, gitlab, direct urls
-- **asset type support** — `.deb`, `.rpm`, `.AppImage`, `.tar.gz`, `.tar.xz`, `.zip`, raw binaries, `.dmg`
-- **dep resolution** — for debs: tries apt first, then stubs unavailable packages with `equivs` (handles broken deps on newer ubuntu like `libgdk-pixbuf2.0-0`)
+- **multi-source** — github, package managers (apt · flatpak · snap · dnf · pacman), direct urls
+- **priority-based auto-install** — single ⚡ button picks the best source automatically
+- **installed packages** — track, view, update, and remove everything in one place
+  - pkgd managed · detected · dependencies · os base packages
 - **smart fallback** — if deb fails, falls back to zip/appimage automatically
-- **desktop entries** — creates `.desktop` files and refreshes plasma/gnome app cache on `-i`
-- **gui** — tauri-based gui with asset priority picker, live install log, and source browser
-- **any shell** — standalone bash script, works in zsh/bash/fish/any shell
+- **desktop entries** — creates `.desktop` files and refreshes the app cache on install
+- **gui** — tauri-based gui with live install log, flyout package controls, update tracking
+- **any shell** — standalone bash script, works in zsh/bash/fish
 - **curl installable** — one line to get pkgd itself
 
 ---
 
 ## install pkgd
 
-**curl one-liner (recommended)**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sudoxreboot/pkgd/main/install.sh | bash
 ```
 
-**git clone**
-```bash
-git clone https://github.com/sudoxreboot/pkgd.git
-cd pkgd
-sudo cp pkgd /usr/local/bin/pkgd
-sudo chmod +x /usr/local/bin/pkgd
-```
+---
 
-**install pkgd with pkgd** (once you have it)
-```bash
-pkgd -i sudoxreboot/pkgd
-```
+## testers wanted — coming soon
+
+we're building something different. pkgd is going live with a gamified beta.
+
+### the scavenger hunt
+- [ ] dynamic quest system pulling challenges via github
+- [ ] xp/leveling logic tied to system health
+- [ ] reward asset system (taco, dino, etc.)
+
+### the healer *(log-parsing)*
+- [ ] auto-install missing dependencies from stderr
+- [ ] silent repair toggle vs verbose console
+
+### the bridge *(windows → linux)*
+- [ ] steam library "skip the store" integration
+- [ ] custom .exe proton prefix orchestration
+
+### boss battles
+- [ ] wouldn't you like to know?
 
 ---
 
-## cli usage
-
-```
-pkgd [options] <repo|url>
-```
-
-| option | description |
-|---|---|
-| `-i` | install after download |
-| `--deb` | force deb package |
-| `--rpm` | force rpm package |
-| `--appimage` | force appimage |
-| `--tar` | force tar archive |
-| `--zip` | force zip archive |
-| `--bin` | force raw binary |
-| `--list` | list all available assets without downloading |
-| `--version` | show version |
-| `-h` / `--help` | show help |
-
-**examples**
-```bash
-# just download to /tmp
-pkgd balena-io/etcher
-
-# download and install
-pkgd -i balena-io/etcher
-
-# full github url
-pkgd -i https://github.com/cli/cli
-
-# gitlab
-pkgd -i https://gitlab.com/inkscape/inkscape
-
-# direct url
-pkgd -i https://example.com/myapp-linux-x64.tar.gz
-
-# force a specific asset type
-pkgd -i --appimage balena-io/etcher
-
-# list all assets for a release
-pkgd --list jesseduffield/lazydocker
-```
+**want to test?**
+keep an eye on this repo — a reddit contest is coming with select criteria.
+i'll be looking for specific types of testers.
 
 ---
 
@@ -105,92 +115,19 @@ pkgd --list jesseduffield/lazydocker
 
 ---
 
-## dep resolution (debian-based)
-
-when a `.deb` install fails due to missing dependencies:
-
-1. runs `apt --fix-broken install`
-2. parses the deb's dependency list
-3. tries `apt install` for each missing dep
-4. if a dep is genuinely unavailable on the current distro version (e.g. `libgdk-pixbuf2.0-0` on ubuntu 24.04), stubs it with an `equivs` dummy package
-5. retries install
-6. if still failing, falls back to the linux zip asset if one exists
-
----
-
-## gui
-
-the pkgd gui is a [tauri](https://tauri.app) app (rust + webview).
-
-**features**
-- search/paste any github, gitlab, or direct url
-- browse all available assets for a release
-- drag to reorder asset type priority per-install
-- live install log with color output
-- os detection display
-- install history
-
-**design**
-- `#1f1f1f` background with lilac grid overlay
-- `#88ffee` primary text
-- `#aaaaff` secondary text
-- jetbrains mono + syne
-
-**build the gui**
-```bash
-# prereqs: rust, node 18+
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-npm install
-npm run tauri build
-```
-
-**run in dev**
-```bash
-npm run tauri dev
-```
-
----
-
-## repo structure
-
-```
-pkgd/
-├── pkgd                      # standalone shell command
-├── install.sh                # curl one-liner installer
-├── package.json
-├── vite.config.js
-├── src/                      # tauri frontend (html/css/js)
-│   └── index.html
-├── src-tauri/
-│   ├── Cargo.toml
-│   ├── tauri.conf.json
-│   └── src/
-│       ├── main.rs
-│       └── lib.rs
-└── README.md
-```
-
----
-
 ## roadmap
 
 - [ ] `pkgd update` — check and update already-installed pkgd-managed apps
-- [ ] `pkgd list` — show installed pkgd-managed packages
-- [ ] `pkgd remove` — uninstall
 - [ ] aur helper integration for arch
 - [ ] flatpak ref support
-- [ ] zshrc function bundled for shell-native usage
+- [ ] gitlab releases
+- [ ] steam / proton integration
+- [ ] windows support (winget / exe fallback)
 - [ ] gui: saved favorites / quick-install list
-- [ ] gui: auto-update checker for managed packages
-- [ ] windows support (winget/exe fallback)
 
 ---
 
 ## license
 
-mit — do whatever you want with it.  
+mit — do whatever you want with it.
 built by [sudoxreboot](https://github.com/sudoxreboot) | [sudoxreboot.studio](https://sudoxreboot.com)
-
-
-
-

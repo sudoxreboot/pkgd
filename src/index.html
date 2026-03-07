@@ -1410,23 +1410,21 @@ async function autoInstall() {
   setStatus('running');
   setAllInstallBtns(true);
 
-  // If we already have a release loaded for this input, use it;
-  // otherwise search GitHub for the best repo match
+  // Fetch silently — don't touch the search UI at all, just gather data
   let release = state.release;
   let sysResults = state.sysSearchResults || [];
 
-  // Always re-search if input changed or no release loaded
-  const currentRepo = $('#release-repo').textContent.split('·')[0].trim();
-  if (!release || !currentRepo.toLowerCase().includes(raw.toLowerCase().split('/').pop())) {
-    const pkgName = raw.includes('/') ? raw.split('/')[1] : raw;
+  // Re-fetch only if no release is loaded or input doesn't match what's shown
+  const currentRepo = state.release ? ($('#release-repo').textContent.split('·')[0].trim()) : '';
+  const inputPkg    = raw.includes('/') ? raw.split('/').pop() : raw;
+  if (!release || !currentRepo.toLowerCase().includes(inputPkg.toLowerCase())) {
+    const pkgName = inputPkg;
     const [ghRes, sysRes] = await Promise.allSettled([
       raw.includes('/') || raw.startsWith('http')
         ? invoke('fetch_release', { repo: raw.replace(/^https?:\/\/github\.com\//, ''), token })
         : invoke('search_github', { name: raw, token }).then(async repos => {
             if (!repos.length) return null;
-            // pick the top result and load its release
             const top = repos[0];
-            $('#search-input').value = top.full_name;
             return invoke('fetch_release', { repo: top.full_name, token });
           }),
       invoke('search_sys_pkgmgr', { query: pkgName }),
@@ -1436,7 +1434,6 @@ async function autoInstall() {
       release = ghRes.value;
       state.release = release;
       state.selectedAsset = null;
-      // don't show GH panel yet — only show it if we actually pick a GH asset
     }
     sysResults = sysRes.status === 'fulfilled' ? sysRes.value : [];
     state.sysSearchResults = sysResults;
@@ -1459,7 +1456,7 @@ async function autoInstall() {
 
   log('   walking priority list...', 'dim');
 
-  // Walk priority — first hit wins
+  // Walk priority — first hit wins; never touch the search panel UI
   for (const ptype of priority) {
     if (excluded.has(ptype)) continue;
     if (SYS_MANAGERS.has(ptype)) {
@@ -1467,9 +1464,6 @@ async function autoInstall() {
         const r = sysMap[ptype];
         log(`   → ${ptype}: "${r.name}"`, 'dim');
         setAllInstallBtns(false);
-        // using sys manager — keep GH panel hidden
-        $('#release-info').classList.remove('visible');
-        $('#assets-section').style.display = 'none';
         await installSysPkg(r.name, ptype);
         return;
       }
@@ -1478,13 +1472,6 @@ async function autoInstall() {
       if (asset) {
         state.selectedAsset = asset;
         log(`   → github: ${asset.name} (${ptype})`, 'dim');
-        // now show GH panel since we're using a GitHub asset
-        if (release) {
-          renderAssets(release.assets, state.settings);
-          $('#release-tag').textContent = release.tag;
-          $('#release-repo').textContent = raw;
-          $('#release-info').classList.add('visible');
-        }
         setAllInstallBtns(false);
         await runInstall(true);
         return;
@@ -1497,17 +1484,9 @@ async function autoInstall() {
   if (filteredAssets.length) {
     state.selectedAsset = filteredAssets[0];
     log(`   → fallback: ${filteredAssets[0].name}`, 'dim');
-    if (release) {
-      renderAssets(release.assets, state.settings);
-      $('#release-tag').textContent = release.tag;
-      $('#release-repo').textContent = raw;
-      $('#release-info').classList.add('visible');
-    }
     await runInstall(true);
   } else if (Object.keys(sysMap).length) {
     const mgr = Object.keys(sysMap)[0];
-    $('#release-info').classList.remove('visible');
-    $('#assets-section').style.display = 'none';
     await installSysPkg(sysMap[mgr].name, mgr);
   } else {
     log('!! nothing found — try a more specific name or load the repo manually', 'warn');
@@ -1720,6 +1699,64 @@ window.closeFlyout = () => {
   _flyout.classList.remove('open');
   _flyout.innerHTML = '';
   delete _flyout.dataset.forId;
+};
+
+// flyout for detected / dep / os sections
+// isOs=true → removes are dangerous (OS base packages)
+// trackable=true → show "track in pkgd" option
+window.openSysFlyout = (btn, name, manager, version, trackable, isOs) => {
+  const safeId = `sflyout-${manager}-${name}`.replace(/[^a-zA-Z0-9\-]/g, '-');
+  if (_flyout.dataset.forId === safeId && _flyout.classList.contains('open')) {
+    closeFlyout();
+    return;
+  }
+  _flyout.dataset.forId = safeId;
+  _flyout.innerHTML = '';
+
+  const addItem = (label, cls, action) => {
+    const el = document.createElement('button');
+    el.className = `flyout-item${cls ? ' ' + cls : ''}`;
+    el.textContent = label;
+    el.addEventListener('click', () => { closeFlyout(); action(); });
+    _flyout.appendChild(el);
+  };
+  const addSep = () => {
+    const hr = document.createElement('hr');
+    hr.className = 'flyout-sep';
+    _flyout.appendChild(hr);
+  };
+
+  addItem('▶  launch', '', () => {
+    log(`:: launching ${name} (${manager})...`, 'info');
+    invoke('launch_sys_pkg', { name, manager }).catch(e => log(`!! ${e}`, 'err'));
+  });
+
+  if (trackable) {
+    addItem('✓  track in pkgd', 'success', () => managePkg(name, manager, version));
+  }
+
+  addSep();
+
+  if (isOs) {
+    addItem('⚠  remove (dangerous)', 'danger', () => {
+      log('⚠ WARNING: The pkgd developers are NOT responsible for system damage caused by removing OS base packages. Proceed entirely at your own risk.', 'warn');
+      removeSysPkg(name, manager);
+    });
+  } else {
+    addItem('✕  remove', 'danger', () => removeSysPkg(name, manager));
+  }
+
+  // position flyout
+  _flyout.classList.add('open');
+  const fw   = _flyout.offsetWidth;
+  const fh   = _flyout.offsetHeight;
+  const rect = btn.getBoundingClientRect();
+  let top  = rect.bottom + 4;
+  let left = rect.right - fw;
+  if (left < 8) left = 8;
+  if (top + fh > window.innerHeight - 8) top = rect.top - fh - 4;
+  _flyout.style.top  = `${top}px`;
+  _flyout.style.left = `${left}px`;
 };
 
 window.openFlyout = (btn, repo, typeStr, safeId) => {
@@ -1949,7 +1986,7 @@ function renderDepByLetter(letterMap, letter) {
     const row = document.createElement('div');
     row.className = 'pkg-row';
     row.style.padding = '8px 14px';
-    const safeName = pkg.name.replace(/'/g, "\\'");
+    const safeName = pkg.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const safeMgr  = pkg.manager.replace(/'/g, "\\'");
     const safeVer  = pkg.version.replace(/'/g, "\\'");
     row.innerHTML = `
@@ -1960,10 +1997,8 @@ function renderDepByLetter(letterMap, letter) {
       <span class="asset-type-badge ${badgeClass(pkg.manager)}">${pkg.manager}</span>
       <span class="pkg-version" style="font-size:10px">${pkg.version}</span>
       <div class="pkg-actions">
-        <button class="btn primary" style="font-size:10px;padding:3px 9px"
-          onclick="managePkg('${safeName}', '${safeMgr}', '${safeVer}')">manage</button>
-        <button class="btn danger" style="font-size:10px;padding:3px 9px"
-          onclick="removeSysPkg('${safeName}', '${safeMgr}')">remove</button>
+        <button class="pkg-controls-btn"
+          onclick="openSysFlyout(this,'${safeName}','${safeMgr}','${safeVer}',true,false)">⋮</button>
       </div>
     `;
     grid.appendChild(row);
@@ -2023,7 +2058,7 @@ function renderDetectedByLetter(letterMap, letter) {
     const row = document.createElement('div');
     row.className = 'pkg-row';
     row.style.padding = '8px 14px';
-    const safeName = pkg.name.replace(/'/g, "\\'");
+    const safeName = pkg.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const safeMgr  = pkg.manager.replace(/'/g, "\\'");
     const safeVer  = pkg.version.replace(/'/g, "\\'");
     row.id = `det-${pkg.manager}-${pkg.name}`.replace(/[^a-zA-Z0-9\-]/g, '-');
@@ -2035,10 +2070,8 @@ function renderDetectedByLetter(letterMap, letter) {
       <span class="asset-type-badge ${badgeClass(pkg.manager)}">${pkg.manager}</span>
       <span class="pkg-version" style="font-size:10px">${pkg.version}</span>
       <div class="pkg-actions">
-        <button class="btn primary" style="font-size:10px;padding:3px 9px"
-          onclick="managePkg('${safeName}', '${safeMgr}', '${safeVer}')">manage</button>
-        <button class="btn danger" style="font-size:10px;padding:3px 9px"
-          onclick="removeSysPkg('${safeName}', '${safeMgr}')">remove</button>
+        <button class="pkg-controls-btn"
+          onclick="openSysFlyout(this,'${safeName}','${safeMgr}','${safeVer}',true,false)">⋮</button>
       </div>
     `;
     grid.appendChild(row);
@@ -2078,6 +2111,11 @@ window.toggleSysPkgs = async () => {
 
   if (_sysPkgsVisible) {
     if (showRow) showRow.style.display = 'none';
+    // hard warning — switch to install tab so they see it
+    $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
+    log('⚠ WARNING: os base packages are displayed below.', 'warn');
+    log('⚠ The pkgd developers take NO responsibility for damage caused by removing system packages.', 'warn');
+    log('⚠ Removing the wrong package can break your OS. Proceed entirely at your own risk.', 'warn');
     if (!state.allSysPkgs.length) {
       await loadSystemPackages();
     } else {
@@ -2176,7 +2214,9 @@ function renderSysByLetter(letterMap, letter) {
     const row = document.createElement('div');
     row.className = 'pkg-row';
     row.style.padding = '8px 14px';
-    const safeId = `sys-${pkg.manager}-${pkg.name}`.replace(/[^a-zA-Z0-9\-]/g, '-');
+    const safeName = pkg.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const safeMgr  = pkg.manager.replace(/'/g, "\\'");
+    const safeVer  = (pkg.version || '').replace(/'/g, "\\'");
     row.innerHTML = `
       <div class="pkg-info">
         <span class="pkg-name" style="font-size:12px">${pkg.name}</span>
@@ -2185,9 +2225,8 @@ function renderSysByLetter(letterMap, letter) {
       <span class="asset-type-badge ${badgeClass(pkg.manager)}">${pkg.manager}</span>
       <span class="pkg-version" style="font-size:10px">${pkg.version}</span>
       <div class="pkg-actions">
-        <button class="btn danger" style="font-size:10px;padding:3px 9px"
-          id="${safeId}-rm"
-          onclick="removeSysPkg('${pkg.name.replace(/'/g,"\\'")}', '${pkg.manager}')">remove</button>
+        <button class="pkg-controls-btn"
+          onclick="openSysFlyout(this,'${safeName}','${safeMgr}','${safeVer}',false,true)">⋮</button>
       </div>
     `;
     grid.appendChild(row);
