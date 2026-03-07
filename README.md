@@ -1,8 +1,11 @@
 # pkgd
+<p align= center>
 **making linux easier than windows '95**
-pull and install unifier · package manager for simplicity · cli or gui — you pick
+</p>
 
-by [sudoxreboot](https://github.com/sudoxreboot)
+<p align= center>  
+pull and install unifier · package manager for simplicity · cli or gui — you pick
+</p>
 
 ---
 
