@@ -755,6 +755,29 @@
     }
     .save-status.visible { opacity: 1; }
 
+    /* ── deps modal ── */
+    .deps-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    .dep-item {
+      font-size: 11px;
+      color: var(--text2);
+      font-family: 'JetBrains Mono', monospace;
+      padding: 5px 10px;
+      background: var(--bg2);
+      border-radius: 4px;
+    }
+    .dep-empty {
+      font-size: 12px;
+      color: var(--text3);
+      text-align: center;
+      padding: 20px 0;
+    }
+
     /* ── warning modal ── */
     .modal-backdrop {
       position: fixed;
@@ -801,6 +824,132 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+    /* ── pkg-card: 4-col layout (name | meta | badge | ⋮) ── */
+    .pkg-card {
+      grid-template-columns: 1fr auto auto auto;
+    }
+    .pkg-card-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 3px;
+    }
+    /* partially tracked warning badge (small, inside left area) */
+    .pkg-untracked {
+      display: inline-block;
+      font-size: 9px;
+      color: var(--yellow);
+      opacity: 0.75;
+      margin-top: 2px;
+    }
+
+    /* ── search section collapse toggles ── */
+    .results-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .results-section-header .results-label { margin-bottom: 0; }
+    .section-toggle-btn {
+      background: none;
+      border: none;
+      color: var(--text3);
+      cursor: pointer;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: color 0.1s;
+    }
+    .section-toggle-btn:hover { color: var(--text2); }
+
+    /* ── explore panel ── */
+    .explore-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+    }
+    .explore-toolbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 16px 20px 8px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .explore-toolbar .search-input { flex: 1; min-width: 200px; }
+    .explore-meta {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      padding: 0 20px 8px;
+      font-size: 11px;
+      color: var(--text3);
+      flex-shrink: 0;
+    }
+    .explore-filter-pills {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      padding: 0 20px 8px;
+      flex-shrink: 0;
+    }
+    .explore-pill {
+      padding: 3px 10px;
+      font-size: 10px;
+    }
+    .explore-pill.active {
+      background: rgba(136,255,238,0.12);
+      border-color: rgba(136,255,238,0.35);
+      color: var(--teal);
+    }
+    .explore-results {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 20px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .explore-entry {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 14px;
+    }
+    .explore-entry.is-installed { border-color: rgba(136,255,170,0.2); }
+    .explore-entry-info { flex: 1; min-width: 0; }
+    .explore-entry-name {
+      display: block;
+      font-size: 12px;
+      color: var(--text2);
+    }
+    .explore-entry-desc {
+      display: block;
+      font-size: 10px;
+      color: var(--text3);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .explore-installed-tag {
+      font-size: 10px;
+      color: var(--green);
+      margin-left: 8px;
+    }
+    .explore-pagination {
+      display: flex;
+      justify-content: center;
+      padding: 10px 20px;
+      flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
@@ -817,6 +966,7 @@
   <!-- tabs -->
   <div class="tabs">
     <div class="tab active" data-tab="install">install</div>
+    <div class="tab" data-tab="explore">explore</div>
     <div class="tab" data-tab="manage">manage</div>
     <div class="tab" data-tab="settings">settings</div>
   </div>
@@ -842,14 +992,24 @@
 
         <!-- github name search results -->
         <div id="search-results" style="display:none">
-          <div class="results-label">github repos — click to load release</div>
-          <div class="search-results-list" id="search-results-list"></div>
+          <div class="results-section-header">
+            <span class="results-label">github repos — click to load release</span>
+            <button class="section-toggle-btn" id="gh-results-toggle" onclick="toggleResultsSection('gh')">▾ hide</button>
+          </div>
+          <div id="gh-results-body">
+            <div class="search-results-list" id="search-results-list"></div>
+          </div>
         </div>
 
         <!-- system pkgmgr search results -->
         <div id="sys-search-results" style="display:none">
-          <div class="results-label" style="margin-top:4px">system packages (apt · flatpak · snap)</div>
-          <div class="sys-search-list" id="sys-search-list"></div>
+          <div class="results-section-header" style="margin-top:4px">
+            <span class="results-label">system packages</span>
+            <button class="section-toggle-btn" id="sys-results-toggle" onclick="toggleResultsSection('sys')">▾ hide</button>
+          </div>
+          <div id="sys-results-body">
+            <div class="sys-search-list" id="sys-search-list"></div>
+          </div>
         </div>
 
         <!-- release info -->
@@ -884,6 +1044,31 @@
         <div class="log-output" id="log-output">
           <div class="log-line dim">ready.</div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── explore panel ── -->
+  <div class="panel" id="tab-explore">
+    <div class="explore-panel">
+      <div class="explore-toolbar">
+        <input class="search-input" id="explore-search" type="text"
+          placeholder="search available packages..." autocomplete="off" spellcheck="false" />
+        <button class="btn primary" id="explore-build-btn">↻ build catalog</button>
+      </div>
+      <div class="explore-filter-pills" id="explore-mgr-pills" style="display:none"></div>
+      <div class="explore-meta" id="explore-meta" style="display:none">
+        <span id="explore-count-label"></span>
+        <span id="explore-cache-label" style="opacity:0.6"></span>
+      </div>
+      <div class="explore-results" id="explore-results">
+        <div class="empty-state">
+          press <strong style="color:var(--teal)">build catalog</strong> to index available packages from your system package managers.<br>
+          results are cached locally — rebuilding is fast on subsequent runs.
+        </div>
+      </div>
+      <div class="explore-pagination" id="explore-pagination" style="display:none">
+        <button class="btn" id="explore-load-more">load more</button>
       </div>
     </div>
   </div>
@@ -961,6 +1146,17 @@
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- ── dependencies modal ── -->
+  <div class="modal-backdrop hidden" id="deps-modal">
+    <div class="modal-box">
+      <div class="modal-title" id="deps-modal-title">dependencies</div>
+      <div class="deps-list" id="deps-modal-list"></div>
+      <div class="modal-actions">
+        <button class="btn primary" onclick="$('#deps-modal').classList.add('hidden')">close</button>
+      </div>
     </div>
   </div>
 
@@ -1149,8 +1345,9 @@ $$('.tab').forEach(tab => {
     $$('.panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     $(`#tab-${tab.dataset.tab}`).classList.add('active');
-    if (tab.dataset.tab === 'manage') loadInstalled();
+    if (tab.dataset.tab === 'manage')   loadInstalled();
     if (tab.dataset.tab === 'settings') loadSettings();
+    if (tab.dataset.tab === 'explore')  loadExplore();
   });
 });
 
@@ -1228,6 +1425,39 @@ function makeAssetItem(asset) {
   return item;
 }
 
+// ── search input tag parsing ──────────────────────────────────────────────
+// Supports: "krita", "krita - 1.2.3", "krita - .deb", "krita - 1.2.3 - .deb"
+// A dash-separated suffix starting with a digit is a version hint.
+// A dash-separated suffix matching a known type is a type hint.
+function parseSearchInput(raw) {
+  const KNOWN_TYPES = new Set(['deb','rpm','appimage','tar','zip','bin','apt','flatpak','snap','dnf','pacman']);
+  const parts = raw.split(/\s+-\s+/);
+  const name = parts[0].trim();
+  let version   = null;
+  let hint_type = null;
+  for (let i = 1; i < parts.length; i++) {
+    const p = parts[i].trim().replace(/^\./, '').toLowerCase();
+    if (/^[0-9v]/.test(p)) {
+      version   = p;
+    } else if (KNOWN_TYPES.has(p)) {
+      hint_type = p;
+    }
+  }
+  return { name, version, hint_type };
+}
+
+// Toggle collapse/expand of a search result section
+window.toggleResultsSection = (section) => {
+  const bodyId   = section === 'gh' ? 'gh-results-body' : 'sys-results-body';
+  const toggleId = section === 'gh' ? 'gh-results-toggle' : 'sys-results-toggle';
+  const body   = document.getElementById(bodyId);
+  const toggle = document.getElementById(toggleId);
+  if (!body || !toggle) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display   = isOpen ? 'none' : 'block';
+  toggle.textContent   = isOpen ? '▸ show' : '▾ hide';
+};
+
 // ── search ────────────────────────────────────────────────────────────────
 function resetSearchUI() {
   $('#search-results').style.display = 'none';
@@ -1239,19 +1469,33 @@ function resetSearchUI() {
   state.selectedAsset = null;
 }
 
-async function doNameSearch(name) {
+async function doNameSearch(name, versionHint, typeHint) {
   resetSearchUI();
-  log(`:: searching for "${name}"...`, 'info');
+  const display = versionHint || typeHint
+    ? `"${name}"${versionHint ? ` v${versionHint}` : ''}${typeHint ? ` [${typeHint}]` : ''}`
+    : `"${name}"`;
+  log(`:: searching for ${display}...`, 'info');
   setStatus('running');
   $('#search-btn').disabled = true;
 
   // load fresh settings
   const s = await invoke('load_settings').catch(() => state.settings);
   state.settings = s || state.settings;
-  const token = s?.github_token || null;
+  const token    = s?.github_token || null;
+  const priority = s?.priority || [];
+  const excluded = new Set(s?.excluded_types || []);
+  const SYS_TYPES = new Set(['apt', 'flatpak', 'snap', 'dnf', 'pacman']);
+  const GH_TYPES  = new Set(['deb', 'rpm', 'appimage', 'tar', 'zip', 'bin']);
 
-  // run GitHub search and sys pkgmgr search in parallel
-  log('   checking system package managers...', 'dim');
+  // Determine display order: sys first if any sys manager comes before all GH types
+  const firstSysIdx = priority.findIndex(t => SYS_TYPES.has(t) && !excluded.has(t));
+  const firstGhIdx  = priority.findIndex(t => GH_TYPES.has(t)  && !excluded.has(t));
+  const sysFirst    = firstSysIdx !== -1 && (firstGhIdx === -1 || firstSysIdx < firstGhIdx);
+
+  // If a type hint is a sys manager, force sys first
+  const isSysHint = typeHint && SYS_TYPES.has(typeHint);
+
+  log('   checking all sources in parallel...', 'dim');
   const [ghResults, sysResults] = await Promise.allSettled([
     invoke('search_github', { name, token }),
     invoke('search_sys_pkgmgr', { query: name }),
@@ -1259,9 +1503,17 @@ async function doNameSearch(name) {
 
   let found = false;
 
-  // ── GitHub results ────────────────────────────────────────────────────────
-  const ghList = ghResults.status === 'fulfilled' ? ghResults.value : [];
-  if (ghList.length > 0) {
+  const ghList  = ghResults.status  === 'fulfilled' ? ghResults.value  : [];
+  const sysList = sysResults.status === 'fulfilled' ? sysResults.value : [];
+  state.sysSearchResults = sysList;
+
+  // filter sysList by typeHint if provided
+  const filteredSys = typeHint && SYS_TYPES.has(typeHint)
+    ? sysList.filter(r => r.manager === typeHint)
+    : sysList;
+
+  const renderGh = () => {
+    if (!ghList.length) return;
     found = true;
     const list = $('#search-results-list');
     list.innerHTML = '';
@@ -1279,22 +1531,20 @@ async function doNameSearch(name) {
         $('#search-input').value = r.full_name;
         $('#search-results').style.display = 'none';
         $('#sys-search-results').style.display = 'none';
-        doRepoSearch(r.full_name);
+        doRepoSearch(r.full_name, versionHint);
       });
       list.appendChild(card);
     });
     $('#search-results').style.display = 'block';
     log(`:: found ${ghList.length} GitHub repos`, 'info');
-  }
+  };
 
-  // ── system pkgmgr results ─────────────────────────────────────────────────
-  const sysList = sysResults.status === 'fulfilled' ? sysResults.value : [];
-  state.sysSearchResults = sysList; // store for auto-install
-  if (sysList.length > 0) {
+  const renderSys = () => {
+    if (!filteredSys.length) { log('   no system packages found', 'dim'); return; }
     found = true;
     const list = $('#sys-search-list');
     list.innerHTML = '';
-    sysList.forEach(r => {
+    filteredSys.forEach(r => {
       const card = document.createElement('div');
       card.className = 'sys-search-card';
       card.innerHTML = `
@@ -1309,22 +1559,27 @@ async function doNameSearch(name) {
       list.appendChild(card);
     });
     $('#sys-search-results').style.display = 'block';
-    log(`:: found ${sysList.length} system package results`, 'info');
+    log(`:: found ${filteredSys.length} system package result(s)`, 'info');
+  };
+
+  // Render in priority order
+  if (sysFirst || isSysHint) {
+    renderSys();
+    if (!typeHint || !isSysHint) renderGh();
   } else {
-    log('   no system packages found', 'dim');
+    renderGh();
+    renderSys();
   }
 
-  if (!found) {
-    log(`!! no results found for "${name}"`, 'warn');
-  }
-
+  if (!found) log(`!! no results found for "${name}"`, 'warn');
   setStatus(found ? 'ok' : 'error');
   $('#search-btn').disabled = false;
 }
 
-async function doRepoSearch(repo) {
+async function doRepoSearch(repo, versionHint) {
   resetSearchUI();
-  log(`:: fetching release info for ${repo}...`, 'info');
+  const vStr = versionHint ? ` @ ${versionHint}` : '';
+  log(`:: fetching release info for ${repo}${vStr}...`, 'info');
   setStatus('running');
   $('#search-btn').disabled = true;
 
@@ -1338,7 +1593,7 @@ async function doRepoSearch(repo) {
     // use the package-name portion of the repo (e.g. "etcher" from "balena-io/etcher")
     const pkgName = repo.split('/')[1] || repo;
     const [releaseResult, sysResult] = await Promise.allSettled([
-      invoke('fetch_release', { repo, token }),
+      invoke('fetch_release', { repo, version: versionHint || null, token }),
       invoke('search_sys_pkgmgr', { query: pkgName }),
     ]);
 
@@ -1385,16 +1640,19 @@ async function doSearch() {
   const raw = $('#search-input').value.trim();
   if (!raw) return;
 
-  if (!raw.includes('/') && !raw.startsWith('http')) {
-    await doNameSearch(raw);
+  const { name, version, hint_type } = parseSearchInput(raw);
+
+  // owner/repo or full GitHub URL → repo search
+  if (name.includes('/') || name.startsWith('http')) {
+    let repo = name;
+    if (name.startsWith('https://github.com/')) {
+      repo = name.replace('https://github.com/', '').split('/').slice(0, 2).join('/');
+    }
+    await doRepoSearch(repo, version);
     return;
   }
 
-  let repo = raw;
-  if (raw.startsWith('https://github.com/')) {
-    repo = raw.replace('https://github.com/', '').split('/').slice(0, 2).join('/');
-  }
-  await doRepoSearch(repo);
+  await doNameSearch(name, version, hint_type);
 }
 
 $('#search-btn').addEventListener('click', doSearch);
@@ -1405,21 +1663,22 @@ $('#search-input').addEventListener('input', resetSearchUI);
 window.installSysPkg = async (name, manager) => {
   log(`:: installing ${name} via ${manager}...`, 'info');
   setStatus('running');
-  // switch to install tab to show log
-  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
   try {
     const succeeded = await invoke('run_sys_install', { name, manager });
     if (succeeded) {
-      // track in pkgd managed so it shows up in the installed tab
+      // query actual installed version from the manager
+      const version = await invoke('get_sys_pkg_version', { name, manager }).catch(() => 'system');
+      // track in pkgd managed so it shows up in the manage tab
       await invoke('record_installed', {
         pkg: {
           repo: `${manager}/${name}`,
           name,
-          version: 'system',
+          version: version || 'system',
           asset_type: manager,
           url: '',
           date: new Date().toISOString(),
           date_released: '',
+          partially_tracked: false,
         }
       }).catch(() => {});
     }
@@ -1614,15 +1873,14 @@ function makePkgRow(pkg) {
     <div class="pkg-card-left">
       <span class="pkg-name">${displayName}</span>
       <span class="pkg-repo-label">${pkg.repo}</span>
+      ${pkg.partially_tracked ? `<span class="pkg-untracked" title="added to pkgd tracking externally — dependency details and install history may not be fully known. reinstall or update via pkgd to clear this.">⚠ partially tracked</span>` : ''}
     </div>
-    <div class="pkg-card-right">
-      <div class="pkg-card-top-row">
-        <span class="asset-type-badge ${badgeClass(typeStr)}">${typeStr}</span>
-        <span class="pkg-card-version">${pkg.version}</span>
-        <span class="pkg-update-inline" id="ua-${safeId}">···</span>
-      </div>
+    <div class="pkg-card-meta">
+      <span class="pkg-card-version">${pkg.version}</span>
       ${installDate ? `<span class="pkg-card-date">installed ${installDate}</span>` : ''}
+      <span class="pkg-update-inline" id="ua-${safeId}">···</span>
     </div>
+    <span class="asset-type-badge ${badgeClass(typeStr)}">${typeStr}</span>
     <button class="pkg-controls-btn" onclick="openFlyout(this,'${safeRepo}','${safeType}','${safeId}')">⋮</button>
   `;
   return card;
@@ -1694,7 +1952,6 @@ async function updateAll() {
     return;
   }
   log(`:: updating ${toUpdate.length} package(s)...`, 'info');
-  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
   for (const pkg of toUpdate) {
     await updatePkg(pkg.repo, pkg.asset_type);
   }
@@ -1729,7 +1986,6 @@ window.updatePkg = async (repo, manager) => {
   const { manager: mgr, name } = parseRepo(repo, manager);
   log(`:: updating ${name}${mgr ? ` (${mgr})` : ''}...`, 'info');
   setStatus('running');
-  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
   try {
     if (mgr) {
       await invoke('run_sys_install', { name, manager: mgr });
@@ -1843,8 +2099,9 @@ window.openFlyout = (btn, repo, typeStr, safeId) => {
     _flyout.appendChild(hr);
   };
 
-  addItem('▶  launch / manage', '',       () => launchPkg(repo, typeStr));
+  addItem('▶  launch',          '',       () => launchPkg(repo, typeStr));
   addItem('✕  remove',          'danger', () => removePkg(repo, typeStr));
+  addItem('⊘  unmanage',        '',       () => unmanagePkg(repo));
   addItem('⋯  dependencies',    '',       () => showDeps(repo, typeStr));
 
   addSep();
@@ -1900,7 +2157,6 @@ window.launchPkg = async (repo, manager) => {
 
   log(`:: launching ${name} (${mgr})...`, 'info');
   setStatus('running');
-  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
   try {
     if (SYS_MANAGERS.has(mgr) && mgr !== 'deb') {
       await invoke('launch_sys_pkg', { name, manager: mgr });
@@ -1914,19 +2170,32 @@ window.launchPkg = async (repo, manager) => {
 };
 
 window.showDeps = async (repo, manager) => {
-  const mgr = manager || repo.split('/')[0];
+  const mgr  = manager || repo.split('/')[0];
   const name = repo.includes('/') ? repo.split('/').slice(1).join('/') : repo;
+
+  const modal  = $('#deps-modal');
+  const title  = $('#deps-modal-title');
+  const list   = $('#deps-modal-list');
+
+  title.textContent = `dependencies — ${name}`;
+  list.innerHTML = '<div class="dep-empty">loading…</div>';
+  modal.classList.remove('hidden');
 
   try {
     const deps = await invoke('get_pkg_deps', { name, manager: mgr });
+    list.innerHTML = '';
     if (!deps.length) {
-      log(`   ${name}: no tracked dependencies found`, 'dim');
+      list.innerHTML = '<div class="dep-empty">no dependencies found.</div>';
       return;
     }
-    log(`   ${name} dependencies (${deps.length}):`, 'dim');
-    deps.forEach(d => log(`     · ${d}`, 'dim'));
+    deps.forEach(d => {
+      const el = document.createElement('div');
+      el.className = 'dep-item';
+      el.textContent = d;
+      list.appendChild(el);
+    });
   } catch (e) {
-    log(`!! could not fetch deps for ${name}: ${e}`, 'err');
+    list.innerHTML = `<div class="dep-empty" style="color:var(--red)">error: ${e}</div>`;
   }
 };
 
@@ -2142,23 +2411,37 @@ function renderDetectedByLetter(letterMap, letter) {
 }
 
 // Move a detected package into pkgd managed (adds to installed.json, reloads)
+// Sets partially_tracked=true since pkgd didn't watch the original install.
 window.managePkg = async (name, manager, version) => {
   log(`:: tracking ${name} (${manager}) as pkgd managed...`, 'info');
   try {
     await invoke('record_installed', { pkg: {
-      repo:          `${manager}/${name}`,
+      repo:             `${manager}/${name}`,
       name,
-      version:       version || 'system',
-      asset_type:    manager,
-      url:           '',
-      date:          new Date().toISOString(),
-      date_released: '',
+      version:          version || 'system',
+      asset_type:       manager,
+      url:              '',
+      date:             new Date().toISOString(),
+      date_released:    '',
+      partially_tracked: true,
     }});
-    log(`:: ${name} moved to pkgd managed.`, 'ok');
-    // reload both sections so package moves from detected → managed
+    log(`:: ${name} added to pkgd managed. (marked partially tracked — reinstall via pkgd to clear)`, 'done');
     loadInstalled();
   } catch (e) {
     log(`!! could not track ${name}: ${e}`, 'err');
+  }
+};
+
+// Remove from pkgd tracking WITHOUT uninstalling — package stays on system.
+window.unmanagePkg = async (repo) => {
+  const { name } = parseRepo(repo, null);
+  log(`:: removing ${name} from pkgd tracking (not uninstalling from system)...`, 'info');
+  try {
+    await invoke('remove_installed', { repo });
+    log(`:: ${name} is no longer tracked by pkgd.`, 'done');
+    await loadInstalled();
+  } catch (e) {
+    log(`!! could not unmanage ${name}: ${e}`, 'err');
   }
 };
 
@@ -2306,7 +2589,6 @@ function renderSysByLetter(letterMap, letter) {
 window.removeSysPkg = async (name, manager) => {
   log(`:: removing ${name} (${manager})...`, 'warn');
   setStatus('running');
-  $$('.tab').forEach(t => { if (t.dataset.tab === 'install') t.click(); });
   try {
     await invoke('run_sys_remove', { name, manager });
   } catch (e) {
@@ -2316,6 +2598,154 @@ window.removeSysPkg = async (name, manager) => {
 };
 
 // (pkgd-done refresh handled by the primary listener above)
+
+// ── explore tab ─────────────────────────────────────────────────────────────
+const exploreState = {
+  catalog:       [],   // all entries from cache/build
+  filtered:      [],   // after search + manager filter
+  page:          0,
+  pageSize:      50,
+  query:         '',
+  managerFilter: 'all',
+};
+
+async function loadExplore() {
+  const resultsEl = $('#explore-results');
+  resultsEl.innerHTML = '<div class="empty-state">checking cache…</div>';
+  try {
+    const cache = await invoke('load_explore_cache');
+    if (cache && cache.packages && cache.packages.length) {
+      exploreState.catalog = cache.packages;
+      const date = new Date(cache.cached_at * 1000);
+      $('#explore-cache-label').textContent = `cached ${date.toLocaleDateString()}`;
+      $('#explore-meta').style.display = 'flex';
+      $('#explore-build-btn').textContent = '↻ rebuild';
+      applyExploreFilter();
+    } else {
+      resultsEl.innerHTML = `<div class="empty-state">
+        press <strong style="color:var(--teal)">build catalog</strong> to index available packages.<br>
+        scans apt, flatpak, and other installed package managers. cached locally for fast reloads.
+      </div>`;
+    }
+  } catch (e) {
+    resultsEl.innerHTML = `<div class="empty-state" style="color:var(--text3)">could not load cache: ${e}</div>`;
+  }
+}
+
+function applyExploreFilter() {
+  const q   = exploreState.query.toLowerCase();
+  const mgr = exploreState.managerFilter;
+  exploreState.filtered = exploreState.catalog.filter(e => {
+    if (mgr !== 'all' && e.manager !== mgr) return false;
+    if (q && !e.name.toLowerCase().includes(q) && !e.description.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  exploreState.page = 0;
+
+  // Update manager pills
+  const managers = [...new Set(exploreState.catalog.map(e => e.manager))];
+  renderExploreManagerPills(managers);
+
+  // Update count
+  const label = $('#explore-count-label');
+  if (label) label.textContent = `${exploreState.filtered.length.toLocaleString()} packages`;
+
+  renderExplorePage();
+}
+
+function renderExploreManagerPills(managers) {
+  const pills = $('#explore-mgr-pills');
+  if (!pills || !managers.length) return;
+  pills.style.display = 'flex';
+  pills.innerHTML = '';
+
+  const allBtn = document.createElement('button');
+  allBtn.className = `btn explore-pill${exploreState.managerFilter === 'all' ? ' active' : ''}`;
+  allBtn.textContent = 'all';
+  allBtn.addEventListener('click', () => { exploreState.managerFilter = 'all'; applyExploreFilter(); });
+  pills.appendChild(allBtn);
+
+  managers.forEach(mgr => {
+    const pill = document.createElement('button');
+    pill.className = `btn explore-pill${exploreState.managerFilter === mgr ? ' active' : ''}`;
+    pill.innerHTML = `<span class="asset-type-badge ${badgeClass(mgr)}">${mgr}</span>`;
+    pill.addEventListener('click', () => { exploreState.managerFilter = mgr; applyExploreFilter(); });
+    pills.appendChild(pill);
+  });
+}
+
+function renderExplorePage() {
+  const resultsEl  = $('#explore-results');
+  const pagination = $('#explore-pagination');
+
+  if (!exploreState.filtered.length) {
+    resultsEl.innerHTML = '<div class="empty-state">no results.</div>';
+    if (pagination) pagination.style.display = 'none';
+    return;
+  }
+
+  if (exploreState.page === 0) resultsEl.innerHTML = '';
+
+  const start = exploreState.page * exploreState.pageSize;
+  const slice = exploreState.filtered.slice(start, start + exploreState.pageSize);
+
+  slice.forEach(entry => {
+    const row = document.createElement('div');
+    row.className = `explore-entry${entry.installed ? ' is-installed' : ''}`;
+    const safeName = entry.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const safeMgr  = entry.manager.replace(/'/g, "\\'");
+    row.innerHTML = `
+      <div class="explore-entry-info">
+        <span class="explore-entry-name">${entry.name}${entry.installed ? '<span class="explore-installed-tag">✓ installed</span>' : ''}</span>
+        ${entry.description ? `<span class="explore-entry-desc">${entry.description}</span>` : ''}
+      </div>
+      <span class="asset-type-badge ${badgeClass(entry.manager)}">${entry.manager}</span>
+      <button class="btn yellow" style="font-size:10px;padding:4px 10px;flex-shrink:0"
+        onclick="installSysPkg('${safeName}','${safeMgr}')">install</button>
+    `;
+    resultsEl.appendChild(row);
+  });
+
+  const hasMore = (start + exploreState.pageSize) < exploreState.filtered.length;
+  if (pagination) pagination.style.display = hasMore ? 'flex' : 'none';
+}
+
+async function buildExploreCatalog() {
+  const btn = $('#explore-build-btn');
+  btn.disabled = true;
+  btn.textContent = '↻ building…';
+  log(':: building explore catalog — scanning package managers...', 'info');
+  setStatus('running');
+  try {
+    const entries = await invoke('build_explore_catalog');
+    exploreState.catalog = entries;
+    const now = new Date();
+    const cacheLbl = $('#explore-cache-label');
+    if (cacheLbl) cacheLbl.textContent = `cached ${now.toLocaleDateString()}`;
+    $('#explore-meta').style.display = 'flex';
+    applyExploreFilter();
+    setStatus('ok');
+  } catch (e) {
+    log(`!! catalog build failed: ${e}`, 'err');
+    setStatus('error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↻ rebuild';
+  }
+}
+
+$('#explore-build-btn')?.addEventListener('click', buildExploreCatalog);
+$('#explore-load-more')?.addEventListener('click', () => {
+  exploreState.page++;
+  renderExplorePage();
+});
+
+let _exploreSearchTimer = null;
+$('#explore-search')?.addEventListener('input', () => {
+  exploreState.query = $('#explore-search').value.trim();
+  if (_exploreSearchTimer) clearTimeout(_exploreSearchTimer);
+  _exploreSearchTimer = setTimeout(applyExploreFilter, 200);
+});
 
 // ── settings ──────────────────────────────────────────────────────────────
 // Master list of all possible types (used as fallback / for badge rendering)
@@ -2392,7 +2822,7 @@ function renderPriorityList() {
     item.innerHTML = `
       <span class="drag-handle">⠿</span>
       <span class="asset-type-badge ${badgeClass(type)}">${type}</span>
-      <span class="priority-item-name">${type}</span>
+      <span class="priority-item-name"></span>
       <input type="checkbox" class="priority-item-toggle" ${isEnabled ? 'checked' : ''} />
     `;
     list.appendChild(item);

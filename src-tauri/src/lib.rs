@@ -41,6 +41,11 @@ pub struct InstalledPkg {
     /// When true, pkgd skips update checks for this package
     #[serde(default)]
     pub locked: bool,
+    /// True when added to pkgd tracking from outside (managePkg / track-in-pkgd).
+    /// Dependencies and install details may not be fully known.
+    /// Clears automatically when the package is reinstalled or updated via pkgd.
+    #[serde(default)]
+    pub partially_tracked: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -105,7 +110,29 @@ pub struct UpdateStatus {
     pub has_update: bool,
 }
 
+/// A single entry in the explore catalog.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ExploreEntry {
+    pub name: String,
+    pub description: String,
+    pub manager: String,
+    pub category: String,
+    pub installed: bool,
+}
+
+/// Cached explore catalog written to ~/.pkgd/explore_cache.json.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExploreCache {
+    /// Unix timestamp (seconds since epoch) when this cache was built.
+    pub cached_at: u64,
+    pub packages: Vec<ExploreEntry>,
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
+
+fn explore_cache_path() -> std::path::PathBuf {
+    pkgd_dir().join("explore_cache.json")
+}
 
 fn pkgd_dir() -> std::path::PathBuf {
     dirs::home_dir()
@@ -771,27 +798,39 @@ async fn get_pkg_deps(name: String, manager: String) -> Vec<String> {
 async fn search_sys_pkgmgr(query: String) -> Vec<SysPkgResult> {
     let mut results: Vec<SysPkgResult> = Vec::new();
 
+    // rank a package name against the query: lower = better match
+    // 0 = exact, 1 = exact case-insensitive, 2 = prefix, 3 = prefix case-insensitive, 4 = other
+    let match_rank = |name: &str| -> u8 {
+        let q = &query;
+        if name == q.as_str() { 0 }
+        else if name.eq_ignore_ascii_case(q.as_str()) { 1 }
+        else if name.starts_with(q.as_str()) { 2 }
+        else if name.to_lowercase().starts_with(&q.to_lowercase()) { 3 }
+        else { 4 }
+    };
+
     // ── apt-cache (Debian/Ubuntu) ─────────────────────────────────────────────
     if let Ok(output) = std::process::Command::new("apt-cache")
         .args(["search", &query])
         .output()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut count = 0;
+        let mut apt: Vec<SysPkgResult> = Vec::new();
         for line in stdout.lines() {
-            if count >= 8 { break; }
             if let Some(idx) = line.find(" - ") {
                 let name = line[..idx].trim();
                 if name.starts_with("lib") { continue; }
                 if name.ends_with("-dev") || name.ends_with("-doc") || name.ends_with("-dbg") { continue; }
-                results.push(SysPkgResult {
+                apt.push(SysPkgResult {
                     name: name.to_string(),
                     description: line[idx+3..].trim().to_string(),
                     manager: "apt".to_string(),
                 });
-                count += 1;
             }
         }
+        // sort: exact name match first, then prefix, then rest
+        apt.sort_by_key(|r| match_rank(&r.name));
+        results.extend(apt.into_iter().take(8));
     }
 
     // ── dnf (Fedora/RHEL/CentOS) ──────────────────────────────────────────────
@@ -800,9 +839,8 @@ async fn search_sys_pkgmgr(query: String) -> Vec<SysPkgResult> {
         .output()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut count = 0;
+        let mut dnf: Vec<SysPkgResult> = Vec::new();
         for line in stdout.lines() {
-            if count >= 6 { break; }
             // skip section headers (===) and empty lines
             if line.starts_with('=') || line.trim().is_empty() { continue; }
             if let Some(idx) = line.find(" : ") {
@@ -811,14 +849,15 @@ async fn search_sys_pkgmgr(query: String) -> Vec<SysPkgResult> {
                 let name = raw_name.split('.').next().unwrap_or(raw_name);
                 if name.starts_with("lib") { continue; }
                 if name.ends_with("-devel") { continue; }
-                results.push(SysPkgResult {
+                dnf.push(SysPkgResult {
                     name: name.to_string(),
                     description: line[idx+3..].trim().to_string(),
                     manager: "dnf".to_string(),
                 });
-                count += 1;
             }
         }
+        dnf.sort_by_key(|r| match_rank(&r.name));
+        results.extend(dnf.into_iter().take(6));
     }
 
     // ── pacman (Arch/Manjaro) ─────────────────────────────────────────────────
@@ -828,9 +867,9 @@ async fn search_sys_pkgmgr(query: String) -> Vec<SysPkgResult> {
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let lines: Vec<&str> = stdout.lines().collect();
+        let mut pacman: Vec<SysPkgResult> = Vec::new();
         let mut i = 0;
-        let mut count = 0;
-        while i < lines.len() && count < 6 {
+        while i < lines.len() {
             let line = lines[i];
             // pkg line: "repo/pkgname version [flags]", desc is next indented line
             if let Some(slash) = line.find('/') {
@@ -842,18 +881,19 @@ async fn search_sys_pkgmgr(query: String) -> Vec<SysPkgResult> {
                     } else {
                         String::new()
                     };
-                    results.push(SysPkgResult {
+                    pacman.push(SysPkgResult {
                         name: name.to_string(),
                         description: desc,
                         manager: "pacman".to_string(),
                     });
-                    count += 1;
                 }
                 i += 2;
             } else {
                 i += 1;
             }
         }
+        pacman.sort_by_key(|r| match_rank(&r.name));
+        results.extend(pacman.into_iter().take(6));
     }
 
     // ── flatpak search ────────────────────────────────────────────────────────
@@ -862,17 +902,20 @@ async fn search_sys_pkgmgr(query: String) -> Vec<SysPkgResult> {
         .output()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines().take(5) {
+        let mut fp: Vec<SysPkgResult> = Vec::new();
+        for line in stdout.lines() {
             if line.trim().is_empty() { continue; }
             let parts: Vec<&str> = line.splitn(2, '\t').collect();
             let name = parts[0].trim();
             if name.is_empty() { continue; }
-            results.push(SysPkgResult {
+            fp.push(SysPkgResult {
                 name: name.to_string(),
                 description: parts.get(1).unwrap_or(&"").trim().to_string(),
                 manager: "flatpak".to_string(),
             });
         }
+        fp.sort_by_key(|r| match_rank(&r.name));
+        results.extend(fp.into_iter().take(5));
     }
 
     // ── snap find ─────────────────────────────────────────────────────────────
@@ -881,18 +924,21 @@ async fn search_sys_pkgmgr(query: String) -> Vec<SysPkgResult> {
         .output()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines().skip(1).take(5) {
+        let mut snap: Vec<SysPkgResult> = Vec::new();
+        for line in stdout.lines().skip(1) {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.is_empty() { continue; }
             let name = parts[0];
             if name.is_empty() { continue; }
             let desc = if parts.len() > 3 { parts[3..].join(" ") } else { String::new() };
-            results.push(SysPkgResult {
+            snap.push(SysPkgResult {
                 name: name.to_string(),
                 description: desc,
                 manager: "snap".to_string(),
             });
         }
+        snap.sort_by_key(|r| match_rank(&r.name));
+        results.extend(snap.into_iter().take(5));
     }
 
     results
@@ -973,6 +1019,170 @@ fn record_installed(pkg: InstalledPkg) -> Result<(), String> {
     let data = serde_json::to_string_pretty(&pkgs).map_err(|e| e.to_string())?;
     std::fs::write(path, data).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Query the currently installed version of a package from its manager.
+/// Returns "system" as fallback if the version can't be determined.
+#[tauri::command]
+async fn get_sys_pkg_version(name: String, manager: String) -> String {
+    match manager.as_str() {
+        "apt" | "deb" => {
+            if let Ok(out) = std::process::Command::new("dpkg-query")
+                .args(["-W", "-f", "${Version}", &name])
+                .output()
+            {
+                let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !v.is_empty() && !v.starts_with("dpkg-query:") { return v; }
+            }
+        }
+        "flatpak" => {
+            if let Ok(out) = std::process::Command::new("flatpak")
+                .args(["info", "--show-version", &name])
+                .output()
+            {
+                let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !v.is_empty() { return v; }
+            }
+        }
+        "snap" => {
+            if let Ok(out) = std::process::Command::new("snap")
+                .args(["list", &name])
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                for line in stdout.lines().skip(1) {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.first().copied() == Some(name.as_str()) {
+                        if let Some(v) = parts.get(1) { return v.to_string(); }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    "system".to_string()
+}
+
+/// Load the explore catalog from the on-disk cache, if it exists.
+#[tauri::command]
+fn load_explore_cache() -> Option<ExploreCache> {
+    let data = std::fs::read_to_string(explore_cache_path()).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+/// Build (or rebuild) the explore catalog by querying all available package managers.
+/// Streams progress to the GUI via pkgd-log events, then saves to explore_cache.json.
+#[tauri::command]
+async fn build_explore_catalog(window: tauri::Window) -> Vec<ExploreEntry> {
+    let mut entries: Vec<ExploreEntry> = Vec::new();
+
+    // Build a set of installed package names (pkgd-tracked + dpkg-installed)
+    let installed_names: std::collections::HashSet<String> = {
+        let mut names: std::collections::HashSet<String> = load_installed()
+            .into_iter()
+            .map(|p| p.name.to_lowercase())
+            .collect();
+        if let Ok(out) = std::process::Command::new("dpkg-query")
+            .args(["-f", "${Package}\n", "-W"])
+            .output()
+        {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                names.insert(line.trim().to_lowercase().to_string());
+            }
+        }
+        // flatpak installed apps
+        if let Ok(out) = std::process::Command::new("flatpak")
+            .args(["list", "--app", "--columns=name"])
+            .output()
+        {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                names.insert(line.trim().to_lowercase().to_string());
+            }
+        }
+        names
+    };
+
+    let _ = window.emit("pkgd-log", ":: scanning apt...");
+
+    // apt-cache search "" → "name - description" one line per package
+    if let Ok(out) = std::process::Command::new("apt-cache")
+        .args(["search", ""])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let mut apt_count = 0usize;
+        for line in stdout.lines() {
+            if let Some(idx) = line.find(" - ") {
+                let name = line[..idx].trim();
+                let desc = line[idx + 3..].trim();
+                // filter noise
+                if name.starts_with("lib") { continue; }
+                if name.ends_with("-dev") || name.ends_with("-doc") || name.ends_with("-dbg")
+                    || name.ends_with("-data") { continue; }
+                if name.starts_with("python3-") || name.starts_with("python-")
+                    || name.starts_with("ruby-") || name.starts_with("perl")
+                    || name.starts_with("fonts-") || name.starts_with("gir1.")
+                    || name.starts_with("r-cran-") { continue; }
+                let installed = installed_names.contains(&name.to_lowercase());
+                entries.push(ExploreEntry {
+                    name: name.to_string(),
+                    description: desc.to_string(),
+                    manager: "apt".to_string(),
+                    category: "apt".to_string(),
+                    installed,
+                });
+                apt_count += 1;
+            }
+        }
+        let _ = window.emit("pkgd-log", format!("   apt: {} packages", apt_count));
+    }
+
+    // flatpak remote-ls (user remotes first, then system)
+    let fp_start = entries.len();
+    for scope in &["--user", "--system"] {
+        if let Ok(out) = std::process::Command::new("flatpak")
+            .args(["remote-ls", scope, "--columns=name,description"])
+            .output()
+        {
+            if !out.status.success() { continue; }
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for line in stdout.lines() {
+                if line.trim().is_empty() { continue; }
+                let parts: Vec<&str> = line.splitn(2, '\t').collect();
+                let name = parts[0].trim();
+                if name.is_empty() { continue; }
+                // skip duplicates
+                if entries.iter().any(|e| e.manager == "flatpak" && e.name == name) { continue; }
+                let desc = parts.get(1).unwrap_or(&"").trim();
+                let installed = installed_names.contains(&name.to_lowercase());
+                entries.push(ExploreEntry {
+                    name: name.to_string(),
+                    description: desc.to_string(),
+                    manager: "flatpak".to_string(),
+                    category: "flatpak".to_string(),
+                    installed,
+                });
+            }
+        }
+    }
+    if entries.len() > fp_start {
+        let _ = window.emit("pkgd-log", format!("   flatpak: {} packages", entries.len() - fp_start));
+    }
+
+    // Save cache with current unix timestamp
+    let cached_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let cache = ExploreCache { cached_at, packages: entries.clone() };
+    if let Ok(data) = serde_json::to_string(&cache) {
+        let _ = std::fs::create_dir_all(pkgd_dir());
+        let _ = std::fs::write(explore_cache_path(), data);
+    }
+
+    let _ = window.emit("pkgd-log", format!(":: explore catalog ready — {} packages indexed", entries.len()));
+    let _ = window.emit("pkgd-done", "ok");
+    entries
 }
 
 /// Install a system package via its manager, streaming output to the GUI.
@@ -1093,6 +1303,9 @@ pub fn run() {
             get_pkg_deps,
             launch_sys_pkg,
             search_sys_pkgmgr,
+            get_sys_pkg_version,
+            load_explore_cache,
+            build_explore_catalog,
             run_sys_install,
             run_sys_remove,
         ])

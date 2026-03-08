@@ -1,11 +1,8 @@
 # pkgd
-<p align= center>
 **making linux easier than windows '95**
-</p>
-
-<p align= center>  
 pull and install unifier · package manager for simplicity · cli or gui — you pick
-</p>
+
+by [sudoxreboot](https://github.com/sudoxreboot)
 
 ---
 
@@ -66,7 +63,6 @@ pkgd is a shell command + gui app that installs software from github releases, p
 - **desktop entries** — creates `.desktop` files and refreshes the app cache on install
 - **gui** — tauri-based gui with live install log, flyout package controls, update tracking
 - **any shell** — standalone bash script, works in zsh/bash/fish
-- **curl installable** — one line to get pkgd itself
 
 ---
 
@@ -117,12 +113,10 @@ i'll be looking for specific types of testers.
 - [ ] flatpak ref support
 - [ ] gitlab releases
 - [ ] steam / proton integration
-- [ ] windows support (winget / exe fallback)
-- [ ] gui: saved favorites / quick-install list
 
 ---
 
 ## license
 
 mit — do whatever you want with it.
-built by [sudoxreboot](https://github.com/sudoxreboot) | [sudoxreboot.studio](https://sudoxreboot.com)
+built by [sudoxreboot](https://github.com/sudoxreboot) | [sudoxreboot.com](https://sudoxreboot.com)
