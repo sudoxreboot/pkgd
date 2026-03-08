@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" style="background:#1f1f1f">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -865,56 +865,146 @@
     }
     .section-toggle-btn:hover { color: var(--text2); }
 
-    /* ── explore panel ── */
+    /* ── explore panel (KDE Discover-like) ── */
     .explore-panel {
       display: flex;
       flex-direction: column;
       height: 100%;
       overflow: hidden;
     }
-    .explore-toolbar {
+    /* top search bar */
+    .explore-searchbar {
       display: flex;
+      align-items: center;
       gap: 8px;
-      align-items: center;
-      padding: 16px 20px 8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
-      flex-wrap: wrap;
     }
-    .explore-toolbar .search-input { flex: 1; min-width: 200px; }
-    .explore-meta {
-      display: flex;
-      gap: 14px;
-      align-items: center;
-      padding: 0 20px 8px;
+    .explore-searchbar .search-input { flex: 1; }
+    /* build progress inline bar */
+    .explore-build-progress {
+      padding: 6px 16px;
       font-size: 11px;
       color: var(--text3);
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
-    }
-    .explore-filter-pills {
       display: flex;
-      gap: 4px;
-      flex-wrap: wrap;
-      padding: 0 20px 8px;
-      flex-shrink: 0;
+      align-items: center;
+      gap: 8px;
     }
-    .explore-pill {
-      padding: 3px 10px;
-      font-size: 10px;
-    }
-    .explore-pill.active {
-      background: rgba(136,255,238,0.12);
-      border-color: rgba(136,255,238,0.35);
-      color: var(--teal);
-    }
-    .explore-results {
+    .explore-build-progress .status-dot { flex-shrink: 0; }
+    /* main split layout */
+    .explore-body {
+      display: grid;
+      grid-template-columns: 160px 1fr;
       flex: 1;
+      overflow: hidden;
+    }
+    /* sidebar */
+    .explore-sidebar {
+      border-right: 1px solid var(--border);
       overflow-y: auto;
-      padding: 0 20px 20px;
+      padding: 8px 0;
+      background: var(--bg);
+    }
+    .explore-sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      font-size: 12px;
+      color: var(--text3);
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.1s, color 0.1s;
+      border-left: 2px solid transparent;
+    }
+    .explore-sidebar-item:hover {
+      background: rgba(255,255,255,0.04);
+      color: var(--text2);
+    }
+    .explore-sidebar-item.active {
+      color: var(--teal);
+      border-left-color: var(--teal);
+      background: rgba(136,255,238,0.06);
+    }
+    .explore-sidebar-icon { font-size: 14px; flex-shrink: 0; }
+    .explore-sidebar-sep {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 6px 8px;
+    }
+    /* main content */
+    .explore-content {
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .explore-section-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text2);
+      margin-bottom: 8px;
+    }
+    /* featured grid */
+    .explore-featured-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 8px;
+    }
+    .explore-featured-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      cursor: default;
+      transition: border-color 0.15s;
+    }
+    .explore-featured-card:hover { border-color: var(--lilac2); }
+    .explore-featured-card.is-installed { border-color: rgba(136,255,170,0.25); }
+    .explore-featured-icon {
+      font-size: 24px;
+      line-height: 1;
+    }
+    .explore-featured-name {
+      font-size: 12px;
+      color: var(--text);
+      font-weight: 500;
+    }
+    .explore-featured-desc {
+      font-size: 10px;
+      color: var(--text3);
+      line-height: 1.4;
+    }
+    .explore-featured-footer {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: auto;
+    }
+    .explore-installed-badge {
+      font-size: 10px;
+      color: var(--green);
+      background: rgba(136,255,170,0.08);
+      border: 1px solid rgba(136,255,170,0.2);
+      border-radius: 4px;
+      padding: 2px 7px;
+    }
+    /* package list rows (for categories) */
+    .explore-pkg-list {
       display: flex;
       flex-direction: column;
       gap: 5px;
     }
-    .explore-entry {
+    .explore-pkg-row {
       display: flex;
       align-items: center;
       gap: 12px;
@@ -922,15 +1012,17 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 8px 14px;
+      transition: border-color 0.12s;
     }
-    .explore-entry.is-installed { border-color: rgba(136,255,170,0.2); }
-    .explore-entry-info { flex: 1; min-width: 0; }
-    .explore-entry-name {
+    .explore-pkg-row:hover { border-color: rgba(136,255,238,0.15); }
+    .explore-pkg-row.is-installed { border-color: rgba(136,255,170,0.18); }
+    .explore-pkg-info { flex: 1; min-width: 0; }
+    .explore-pkg-name {
       display: block;
       font-size: 12px;
       color: var(--text2);
     }
-    .explore-entry-desc {
+    .explore-pkg-desc {
       display: block;
       font-size: 10px;
       color: var(--text3);
@@ -939,16 +1031,15 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .explore-installed-tag {
-      font-size: 10px;
-      color: var(--green);
-      margin-left: 8px;
-    }
-    .explore-pagination {
+    .explore-load-more-row {
       display: flex;
       justify-content: center;
-      padding: 10px 20px;
-      flex-shrink: 0;
+      padding: 6px 0;
+    }
+    .explore-meta-bar {
+      font-size: 10px;
+      color: var(--text3);
+      padding: 0 0 4px;
     }
   </style>
 </head>
@@ -1051,26 +1142,75 @@
   <!-- ── explore panel ── -->
   <div class="panel" id="tab-explore">
     <div class="explore-panel">
-      <div class="explore-toolbar">
+
+      <!-- search bar: enter → redirects to install tab search -->
+      <div class="explore-searchbar">
         <input class="search-input" id="explore-search" type="text"
-          placeholder="search available packages..." autocomplete="off" spellcheck="false" />
-        <button class="btn primary" id="explore-build-btn">↻ build catalog</button>
+          placeholder="search packages — press enter to search all sources"
+          autocomplete="off" spellcheck="false" />
+        <button class="btn" id="explore-rebuild-btn" title="rebuild catalog">↻ rebuild</button>
       </div>
-      <div class="explore-filter-pills" id="explore-mgr-pills" style="display:none"></div>
-      <div class="explore-meta" id="explore-meta" style="display:none">
-        <span id="explore-count-label"></span>
-        <span id="explore-cache-label" style="opacity:0.6"></span>
+
+      <!-- inline build progress -->
+      <div class="explore-build-progress" id="explore-build-progress" style="display:none">
+        <div class="status-dot running" id="explore-build-dot"></div>
+        <span id="explore-build-msg">building catalog…</span>
       </div>
-      <div class="explore-results" id="explore-results">
-        <div class="empty-state">
-          press <strong style="color:var(--teal)">build catalog</strong> to index available packages from your system package managers.<br>
-          results are cached locally — rebuilding is fast on subsequent runs.
+
+      <!-- sidebar + content -->
+      <div class="explore-body">
+
+        <!-- left sidebar -->
+        <nav class="explore-sidebar" id="explore-sidebar">
+          <div class="explore-sidebar-item active" data-cat="featured">
+            <span class="explore-sidebar-icon">☆</span> Featured
+          </div>
+          <hr class="explore-sidebar-sep" />
+          <div class="explore-sidebar-item" data-cat="Games">
+            <span class="explore-sidebar-icon">🎮</span> Games
+          </div>
+          <div class="explore-sidebar-item" data-cat="Graphics">
+            <span class="explore-sidebar-icon">🖼</span> Graphics
+          </div>
+          <div class="explore-sidebar-item" data-cat="Internet">
+            <span class="explore-sidebar-icon">🌐</span> Internet
+          </div>
+          <div class="explore-sidebar-item" data-cat="Multimedia">
+            <span class="explore-sidebar-icon">🎵</span> Multimedia
+          </div>
+          <div class="explore-sidebar-item" data-cat="Editors">
+            <span class="explore-sidebar-icon">📝</span> Editors
+          </div>
+          <div class="explore-sidebar-item" data-cat="Development">
+            <span class="explore-sidebar-icon">💻</span> Development
+          </div>
+          <div class="explore-sidebar-item" data-cat="Science">
+            <span class="explore-sidebar-icon">🔬</span> Science
+          </div>
+          <div class="explore-sidebar-item" data-cat="System">
+            <span class="explore-sidebar-icon">⚙</span> System
+          </div>
+          <div class="explore-sidebar-item" data-cat="Desktop">
+            <span class="explore-sidebar-icon">🖥</span> Desktop
+          </div>
+          <div class="explore-sidebar-item" data-cat="Tools">
+            <span class="explore-sidebar-icon">🔧</span> Tools
+          </div>
+          <div class="explore-sidebar-item" data-cat="Libraries">
+            <span class="explore-sidebar-icon">📚</span> Libraries
+          </div>
+          <div class="explore-sidebar-item" data-cat="Other">
+            <span class="explore-sidebar-icon">📦</span> Other
+          </div>
+        </nav>
+
+        <!-- main content area -->
+        <div class="explore-content" id="explore-content">
+          <div class="empty-state">loading catalog…</div>
         </div>
-      </div>
-      <div class="explore-pagination" id="explore-pagination" style="display:none">
-        <button class="btn" id="explore-load-more">load more</button>
-      </div>
-    </div>
+
+      </div><!-- .explore-body -->
+    </div><!-- .explore-panel -->
   </div>
 
   <!-- ── manage panel ── -->
@@ -1512,7 +1652,8 @@ async function doNameSearch(name, versionHint, typeHint) {
     ? sysList.filter(r => r.manager === typeHint)
     : sysList;
 
-  const renderGh = () => {
+  // collapseGh=true → GH section is hidden by default (user has higher-priority sys result)
+  const renderGh = (collapseGh = false) => {
     if (!ghList.length) return;
     found = true;
     const list = $('#search-results-list');
@@ -1536,7 +1677,14 @@ async function doNameSearch(name, versionHint, typeHint) {
       list.appendChild(card);
     });
     $('#search-results').style.display = 'block';
-    log(`:: found ${ghList.length} GitHub repos`, 'info');
+    if (collapseGh) {
+      // collapse GH section — sys manager is higher priority, de-emphasise GH
+      const body   = $('#gh-results-body');
+      const toggle = $('#gh-results-toggle');
+      if (body)   body.style.display   = 'none';
+      if (toggle) toggle.textContent   = '▸ show';
+    }
+    log(`:: found ${ghList.length} GitHub repos${collapseGh ? ' (collapsed — sys manager is higher priority)' : ''}`, 'info');
   };
 
   const renderSys = () => {
@@ -1562,10 +1710,13 @@ async function doNameSearch(name, versionHint, typeHint) {
     log(`:: found ${filteredSys.length} system package result(s)`, 'info');
   };
 
-  // Render in priority order
+  // Render in priority order.
+  // When sys is higher priority AND sys has results, collapse GH results by default
+  // so the user isn't distracted by lower-priority GitHub options.
   if (sysFirst || isSysHint) {
     renderSys();
-    if (!typeHint || !isSysHint) renderGh();
+    const collapseGh = sysFirst && filteredSys.length > 0;
+    if (!typeHint || !isSysHint) renderGh(collapseGh);
   } else {
     renderGh();
     renderSys();
@@ -2599,153 +2750,259 @@ window.removeSysPkg = async (name, manager) => {
 
 // (pkgd-done refresh handled by the primary listener above)
 
-// ── explore tab ─────────────────────────────────────────────────────────────
+// ── explore tab (KDE Discover-like) ─────────────────────────────────────────
+
+const FEATURED_APPS = [
+  { name: 'firefox',        label: 'Firefox',       desc: 'Web browser',              icon: '🦊' },
+  { name: 'vlc',            label: 'VLC',           desc: 'Media player',             icon: '🎬' },
+  { name: 'gimp',           label: 'GIMP',          desc: 'Image editor',             icon: '🖼' },
+  { name: 'inkscape',       label: 'Inkscape',      desc: 'Vector graphics editor',   icon: '✏️' },
+  { name: 'obs-studio',     label: 'OBS Studio',    desc: 'Streaming & recording',    icon: '🎥' },
+  { name: 'audacity',       label: 'Audacity',      desc: 'Audio editor',             icon: '🎤' },
+  { name: 'blender',        label: 'Blender',       desc: '3D creation suite',        icon: '🎨' },
+  { name: 'kdenlive',       label: 'Kdenlive',      desc: 'Non-linear video editor',  icon: '🎞' },
+  { name: 'krita',          label: 'Krita',         desc: 'Digital painting',         icon: '🖌' },
+  { name: 'libreoffice',    label: 'LibreOffice',   desc: 'Office suite',             icon: '📄' },
+  { name: 'vscodium',       label: 'VSCodium',      desc: 'Code editor',              icon: '💻' },
+  { name: 'darktable',      label: 'Darktable',     desc: 'Photo workflow app',       icon: '📷' },
+  { name: 'handbrake',      label: 'HandBrake',     desc: 'Video transcoder',         icon: '📹' },
+  { name: 'signal',         label: 'Signal',        desc: 'Secure messaging',         icon: '💬' },
+  { name: 'thunderbird',    label: 'Thunderbird',   desc: 'Email client',             icon: '📧' },
+  { name: 'transmission',   label: 'Transmission',  desc: 'BitTorrent client',        icon: '⬇' },
+  { name: 'steam',          label: 'Steam',         desc: 'Gaming platform',          icon: '🎮' },
+  { name: 'lutris',         label: 'Lutris',        desc: 'Linux game manager',       icon: '🕹' },
+  { name: 'mpv',            label: 'mpv',           desc: 'Video player',             icon: '▶' },
+  { name: 'calibre',        label: 'Calibre',       desc: 'E-book manager',           icon: '📚' },
+  { name: 'virtualbox',     label: 'VirtualBox',    desc: 'Virtual machines',         icon: '🖥' },
+  { name: 'shotcut',        label: 'Shotcut',       desc: 'Video editor',             icon: '🎬' },
+  { name: 'rawtherapee',    label: 'RawTherapee',   desc: 'RAW photo processor',      icon: '📸' },
+  { name: 'scribus',        label: 'Scribus',       desc: 'Desktop publishing',       icon: '📰' },
+];
+
 const exploreState = {
-  catalog:       [],   // all entries from cache/build
-  filtered:      [],   // after search + manager filter
-  page:          0,
-  pageSize:      50,
-  query:         '',
-  managerFilter: 'all',
+  catalog:      [],   // all entries from cache/build
+  activeCategory: 'featured',
+  catPage:      0,
+  catPageSize:  80,
+  buildListening: false,
 };
 
+// ── sidebar category click handler ──────────────────────────────────────────
+$$('#explore-sidebar .explore-sidebar-item').forEach(item => {
+  item.addEventListener('click', () => {
+    $$('#explore-sidebar .explore-sidebar-item').forEach(i => i.classList.remove('active'));
+    item.classList.add('active');
+    exploreState.activeCategory = item.dataset.cat;
+    exploreState.catPage = 0;
+    renderExploreCategory(exploreState.activeCategory);
+  });
+});
+
+// ── search: redirect to install tab ─────────────────────────────────────────
+$('#explore-search')?.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const q = $('#explore-search').value.trim();
+  if (!q) return;
+  // switch to install tab and trigger search there
+  $$('.tab').forEach(t => t.classList.remove('active'));
+  $$('.panel').forEach(p => p.classList.remove('active'));
+  $('[data-tab="install"]').classList.add('active');
+  $('#tab-install').classList.add('active');
+  $('#search-input').value = q;
+  doSearch();
+});
+
+// ── load explore (auto-builds if no cache) ───────────────────────────────────
 async function loadExplore() {
-  const resultsEl = $('#explore-results');
-  resultsEl.innerHTML = '<div class="empty-state">checking cache…</div>';
+  const content = $('#explore-content');
+  if (exploreState.catalog.length) {
+    // already loaded this session — just re-render current category
+    renderExploreCategory(exploreState.activeCategory);
+    return;
+  }
+  content.innerHTML = '<div class="empty-state">checking catalog…</div>';
   try {
     const cache = await invoke('load_explore_cache');
     if (cache && cache.packages && cache.packages.length) {
       exploreState.catalog = cache.packages;
-      const date = new Date(cache.cached_at * 1000);
-      $('#explore-cache-label').textContent = `cached ${date.toLocaleDateString()}`;
-      $('#explore-meta').style.display = 'flex';
-      $('#explore-build-btn').textContent = '↻ rebuild';
-      applyExploreFilter();
+      renderExploreCategory('featured');
     } else {
-      resultsEl.innerHTML = `<div class="empty-state">
-        press <strong style="color:var(--teal)">build catalog</strong> to index available packages.<br>
-        scans apt, flatpak, and other installed package managers. cached locally for fast reloads.
-      </div>`;
+      // No cache — auto-build immediately, no manual button needed
+      await buildExploreCatalog(true);
     }
-  } catch (e) {
-    resultsEl.innerHTML = `<div class="empty-state" style="color:var(--text3)">could not load cache: ${e}</div>`;
+  } catch {
+    await buildExploreCatalog(true);
   }
 }
 
-function applyExploreFilter() {
-  const q   = exploreState.query.toLowerCase();
-  const mgr = exploreState.managerFilter;
-  exploreState.filtered = exploreState.catalog.filter(e => {
-    if (mgr !== 'all' && e.manager !== mgr) return false;
-    if (q && !e.name.toLowerCase().includes(q) && !e.description.toLowerCase().includes(q)) return false;
-    return true;
-  });
-  exploreState.page = 0;
+// ── build catalog (auto=true means triggered automatically, not by user) ─────
+async function buildExploreCatalog(auto = false) {
+  const btn      = $('#explore-rebuild-btn');
+  const progress = $('#explore-build-progress');
+  const msg      = $('#explore-build-msg');
+  const content  = $('#explore-content');
 
-  // Update manager pills
-  const managers = [...new Set(exploreState.catalog.map(e => e.manager))];
-  renderExploreManagerPills(managers);
-
-  // Update count
-  const label = $('#explore-count-label');
-  if (label) label.textContent = `${exploreState.filtered.length.toLocaleString()} packages`;
-
-  renderExplorePage();
-}
-
-function renderExploreManagerPills(managers) {
-  const pills = $('#explore-mgr-pills');
-  if (!pills || !managers.length) return;
-  pills.style.display = 'flex';
-  pills.innerHTML = '';
-
-  const allBtn = document.createElement('button');
-  allBtn.className = `btn explore-pill${exploreState.managerFilter === 'all' ? ' active' : ''}`;
-  allBtn.textContent = 'all';
-  allBtn.addEventListener('click', () => { exploreState.managerFilter = 'all'; applyExploreFilter(); });
-  pills.appendChild(allBtn);
-
-  managers.forEach(mgr => {
-    const pill = document.createElement('button');
-    pill.className = `btn explore-pill${exploreState.managerFilter === mgr ? ' active' : ''}`;
-    pill.innerHTML = `<span class="asset-type-badge ${badgeClass(mgr)}">${mgr}</span>`;
-    pill.addEventListener('click', () => { exploreState.managerFilter = mgr; applyExploreFilter(); });
-    pills.appendChild(pill);
-  });
-}
-
-function renderExplorePage() {
-  const resultsEl  = $('#explore-results');
-  const pagination = $('#explore-pagination');
-
-  if (!exploreState.filtered.length) {
-    resultsEl.innerHTML = '<div class="empty-state">no results.</div>';
-    if (pagination) pagination.style.display = 'none';
-    return;
+  if (btn) btn.disabled = true;
+  if (progress) progress.style.display = 'flex';
+  if (msg) msg.textContent = 'building catalog — detecting package managers…';
+  if (!auto) {
+    content.innerHTML = '<div class="empty-state">rebuilding catalog…</div>';
   }
 
-  if (exploreState.page === 0) resultsEl.innerHTML = '';
+  // Listen to pkgd-log events to show progress inline (not in the install log)
+  if (!exploreState.buildListening) {
+    exploreState.buildListening = true;
+    listen('pkgd-log', e => {
+      if (progress?.style.display !== 'none' && msg) {
+        msg.textContent = e.payload.replace(/^:: /, '');
+      }
+    });
+  }
 
-  const start = exploreState.page * exploreState.pageSize;
-  const slice = exploreState.filtered.slice(start, start + exploreState.pageSize);
-
-  slice.forEach(entry => {
-    const row = document.createElement('div');
-    row.className = `explore-entry${entry.installed ? ' is-installed' : ''}`;
-    const safeName = entry.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const safeMgr  = entry.manager.replace(/'/g, "\\'");
-    row.innerHTML = `
-      <div class="explore-entry-info">
-        <span class="explore-entry-name">${entry.name}${entry.installed ? '<span class="explore-installed-tag">✓ installed</span>' : ''}</span>
-        ${entry.description ? `<span class="explore-entry-desc">${entry.description}</span>` : ''}
-      </div>
-      <span class="asset-type-badge ${badgeClass(entry.manager)}">${entry.manager}</span>
-      <button class="btn yellow" style="font-size:10px;padding:4px 10px;flex-shrink:0"
-        onclick="installSysPkg('${safeName}','${safeMgr}')">install</button>
-    `;
-    resultsEl.appendChild(row);
-  });
-
-  const hasMore = (start + exploreState.pageSize) < exploreState.filtered.length;
-  if (pagination) pagination.style.display = hasMore ? 'flex' : 'none';
-}
-
-async function buildExploreCatalog() {
-  const btn = $('#explore-build-btn');
-  btn.disabled = true;
-  btn.textContent = '↻ building…';
-  log(':: building explore catalog — scanning package managers...', 'info');
-  setStatus('running');
   try {
     const entries = await invoke('build_explore_catalog');
     exploreState.catalog = entries;
-    const now = new Date();
-    const cacheLbl = $('#explore-cache-label');
-    if (cacheLbl) cacheLbl.textContent = `cached ${now.toLocaleDateString()}`;
-    $('#explore-meta').style.display = 'flex';
-    applyExploreFilter();
-    setStatus('ok');
+    if (progress) progress.style.display = 'none';
+    renderExploreCategory(exploreState.activeCategory || 'featured');
   } catch (e) {
-    log(`!! catalog build failed: ${e}`, 'err');
-    setStatus('error');
+    if (progress) progress.style.display = 'none';
+    content.innerHTML = `<div class="empty-state" style="color:var(--red)">catalog build failed: ${e}</div>`;
   } finally {
-    btn.disabled = false;
-    btn.textContent = '↻ rebuild';
+    if (btn) { btn.disabled = false; }
   }
 }
 
-$('#explore-build-btn')?.addEventListener('click', buildExploreCatalog);
-$('#explore-load-more')?.addEventListener('click', () => {
-  exploreState.page++;
-  renderExplorePage();
-});
+$('#explore-rebuild-btn')?.addEventListener('click', () => buildExploreCatalog(false));
 
-let _exploreSearchTimer = null;
-$('#explore-search')?.addEventListener('input', () => {
-  exploreState.query = $('#explore-search').value.trim();
-  if (_exploreSearchTimer) clearTimeout(_exploreSearchTimer);
-  _exploreSearchTimer = setTimeout(applyExploreFilter, 200);
-});
+// ── render featured home ─────────────────────────────────────────────────────
+function renderExploreCategory(cat) {
+  const content = $('#explore-content');
+  content.innerHTML = '';
+
+  if (cat === 'featured') {
+    renderFeatured(content);
+    return;
+  }
+
+  // Category view
+  const pkgs = exploreState.catalog.filter(e => e.category === cat);
+  if (!pkgs.length && exploreState.catalog.length === 0) {
+    content.innerHTML = '<div class="empty-state">catalog is empty — try rebuilding.</div>';
+    return;
+  }
+  if (!pkgs.length) {
+    content.innerHTML = `<div class="empty-state">no packages in "${cat}".</div>`;
+    return;
+  }
+
+  const meta = document.createElement('div');
+  meta.className = 'explore-meta-bar';
+  meta.textContent = `${pkgs.length.toLocaleString()} packages`;
+  content.appendChild(meta);
+
+  const list = document.createElement('div');
+  list.className = 'explore-pkg-list';
+  content.appendChild(list);
+
+  const renderSlice = () => {
+    const start = exploreState.catPage * exploreState.catPageSize;
+    const slice = pkgs.slice(start, start + exploreState.catPageSize);
+    slice.forEach(entry => {
+      const safeName = entry.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const safeMgr  = entry.manager.replace(/'/g, "\\'");
+      const row = document.createElement('div');
+      row.className = `explore-pkg-row${entry.installed ? ' is-installed' : ''}`;
+      row.innerHTML = `
+        <div class="explore-pkg-info">
+          <span class="explore-pkg-name">${entry.name}${entry.installed ? ' <span class="explore-installed-badge">✓ installed</span>' : ''}</span>
+          ${entry.description ? `<span class="explore-pkg-desc">${entry.description}</span>` : ''}
+        </div>
+        <span class="asset-type-badge ${badgeClass(entry.manager)}" style="flex-shrink:0">${entry.manager}</span>
+        ${entry.installed
+          ? ''
+          : `<button class="btn yellow" style="font-size:10px;padding:4px 10px;flex-shrink:0"
+               onclick="installSysPkg('${safeName}','${safeMgr}')">install</button>`}
+      `;
+      list.appendChild(row);
+    });
+
+    const hasMore = (start + exploreState.catPageSize) < pkgs.length;
+    if (hasMore) {
+      const moreRow = document.createElement('div');
+      moreRow.className = 'explore-load-more-row';
+      const moreBtn = document.createElement('button');
+      moreBtn.className = 'btn';
+      moreBtn.textContent = `load more (${pkgs.length - start - exploreState.catPageSize} remaining)`;
+      moreBtn.addEventListener('click', () => {
+        exploreState.catPage++;
+        moreRow.remove();
+        renderSlice();
+      });
+      moreRow.appendChild(moreBtn);
+      content.appendChild(moreRow);
+    }
+  };
+
+  renderSlice();
+}
+
+function renderFeatured(content) {
+  const title = document.createElement('div');
+  title.className = 'explore-section-title';
+  title.textContent = exploreState.catalog.length ? 'Popular apps' : 'Popular apps — build catalog to see install status';
+  content.appendChild(title);
+
+  const grid = document.createElement('div');
+  grid.className = 'explore-featured-grid';
+  content.appendChild(grid);
+
+  FEATURED_APPS.forEach(app => {
+    // find best catalog entry matching this app
+    const entry = exploreState.catalog.find(e =>
+      e.name.toLowerCase() === app.name.toLowerCase()
+      || e.name.toLowerCase().startsWith(app.name.toLowerCase() + '-')
+    );
+    const installed = entry?.installed || false;
+    const manager   = entry?.manager   || null;
+    const safeName  = (entry?.name || app.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const safeMgr   = (manager || '').replace(/'/g, "\\'");
+
+    const card = document.createElement('div');
+    card.className = `explore-featured-card${installed ? ' is-installed' : ''}`;
+    card.innerHTML = `
+      <div class="explore-featured-icon">${app.icon}</div>
+      <div class="explore-featured-name">${app.label}</div>
+      <div class="explore-featured-desc">${app.desc}</div>
+      <div class="explore-featured-footer">
+        ${installed
+          ? `<span class="explore-installed-badge">✓ installed</span>`
+          : manager
+            ? `<button class="btn yellow" style="font-size:10px;padding:3px 8px"
+                 onclick="installSysPkg('${safeName}','${safeMgr}')">install</button>
+               <span class="asset-type-badge ${badgeClass(manager)}" style="font-size:9px">${manager}</span>`
+            : `<span style="font-size:10px;color:var(--text3)">search to install</span>`
+        }
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+
+  // If catalog is loaded, show a "recently available" by manager section
+  if (exploreState.catalog.length) {
+    const managers = [...new Set(exploreState.catalog.map(e => e.manager))];
+    if (managers.length > 1) {
+      const mgr_section = document.createElement('div');
+      mgr_section.className = 'explore-section-title';
+      mgr_section.style.marginTop = '8px';
+      mgr_section.textContent = `Indexed sources: ${managers.map(m => m).join(' · ')} — ${exploreState.catalog.length.toLocaleString()} packages total`;
+      mgr_section.style.fontSize = '11px';
+      mgr_section.style.fontFamily = 'JetBrains Mono';
+      mgr_section.style.fontWeight = '400';
+      mgr_section.style.color = 'var(--text3)';
+      content.appendChild(mgr_section);
+    }
+  }
+}
 
 // ── settings ──────────────────────────────────────────────────────────────
 // Master list of all possible types (used as fallback / for badge rendering)

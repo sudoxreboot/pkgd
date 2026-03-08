@@ -1070,18 +1070,49 @@ fn load_explore_cache() -> Option<ExploreCache> {
     serde_json::from_str(&data).ok()
 }
 
-/// Build (or rebuild) the explore catalog by querying all available package managers.
-/// Streams progress to the GUI via pkgd-log events, then saves to explore_cache.json.
-#[tauri::command]
-async fn build_explore_catalog(window: tauri::Window) -> Vec<ExploreEntry> {
-    let mut entries: Vec<ExploreEntry> = Vec::new();
+/// Map an apt Section: field value to a human-readable category.
+/// Handles "universe/games", "non-free/games", "games" → all become "Games".
+fn map_apt_section(section: &str) -> &'static str {
+    // strip optional component prefix (universe/, multiverse/, non-free/, restricted/)
+    let sec = section.rsplit('/').next().unwrap_or(section);
+    match sec {
+        "games"                             => "Games",
+        "graphics"                          => "Graphics",
+        "net" | "web"                       => "Internet",
+        "sound" | "audio"                   => "Multimedia",
+        "video"                             => "Multimedia",
+        "editors" | "text"                  => "Editors",
+        "science" | "math" | "electronics" => "Science",
+        "admin" | "base"                    => "System",
+        "devel" | "debug" | "interpreters" => "Development",
+        "utils" | "misc"                    => "Tools",
+        "x11" | "gnome" | "kde" | "xfce"  => "Desktop",
+        "libs"                              => "Libraries",
+        _                                   => "Other",
+    }
+}
 
-    // Build a set of installed package names (pkgd-tracked + dpkg-installed)
-    let installed_names: std::collections::HashSet<String> = {
-        let mut names: std::collections::HashSet<String> = load_installed()
-            .into_iter()
-            .map(|p| p.name.to_lowercase())
-            .collect();
+/// True for apt package names that are noise (libs, dev headers, docs, language bindings).
+fn apt_is_noise(name: &str) -> bool {
+    name.starts_with("lib")
+    || name.ends_with("-dev") || name.ends_with("-doc") || name.ends_with("-dbg")
+    || name.ends_with("-data") || name.ends_with("-common")
+    || name.starts_with("python3-") || name.starts_with("python-")
+    || name.starts_with("ruby-") || name.starts_with("perl")
+    || name.starts_with("fonts-") || name.starts_with("gir1.")
+    || name.starts_with("r-cran-") || name.starts_with("golang-")
+    || name.starts_with("node-") || name.starts_with("libreoffice-l10n-")
+    || name.starts_with("language-pack-")
+}
+
+/// Build the set of already-installed package names (lower-cased) from all available managers.
+fn build_installed_names(mgrs: &[String]) -> std::collections::HashSet<String> {
+    let mut names: std::collections::HashSet<String> = load_installed()
+        .into_iter()
+        .map(|p| p.name.to_lowercase())
+        .collect();
+
+    if mgrs.contains(&"dpkg".to_string()) || mgrs.contains(&"apt".to_string()) {
         if let Ok(out) = std::process::Command::new("dpkg-query")
             .args(["-f", "${Package}\n", "-W"])
             .output()
@@ -1090,7 +1121,8 @@ async fn build_explore_catalog(window: tauri::Window) -> Vec<ExploreEntry> {
                 names.insert(line.trim().to_lowercase().to_string());
             }
         }
-        // flatpak installed apps
+    }
+    if mgrs.contains(&"flatpak".to_string()) {
         if let Ok(out) = std::process::Command::new("flatpak")
             .args(["list", "--app", "--columns=name"])
             .output()
@@ -1099,77 +1131,224 @@ async fn build_explore_catalog(window: tauri::Window) -> Vec<ExploreEntry> {
                 names.insert(line.trim().to_lowercase().to_string());
             }
         }
-        names
-    };
-
-    let _ = window.emit("pkgd-log", ":: scanning apt...");
-
-    // apt-cache search "" → "name - description" one line per package
-    if let Ok(out) = std::process::Command::new("apt-cache")
-        .args(["search", ""])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        let mut apt_count = 0usize;
-        for line in stdout.lines() {
-            if let Some(idx) = line.find(" - ") {
-                let name = line[..idx].trim();
-                let desc = line[idx + 3..].trim();
-                // filter noise
-                if name.starts_with("lib") { continue; }
-                if name.ends_with("-dev") || name.ends_with("-doc") || name.ends_with("-dbg")
-                    || name.ends_with("-data") { continue; }
-                if name.starts_with("python3-") || name.starts_with("python-")
-                    || name.starts_with("ruby-") || name.starts_with("perl")
-                    || name.starts_with("fonts-") || name.starts_with("gir1.")
-                    || name.starts_with("r-cran-") { continue; }
-                let installed = installed_names.contains(&name.to_lowercase());
-                entries.push(ExploreEntry {
-                    name: name.to_string(),
-                    description: desc.to_string(),
-                    manager: "apt".to_string(),
-                    category: "apt".to_string(),
-                    installed,
-                });
-                apt_count += 1;
+    }
+    if mgrs.contains(&"pacman".to_string()) {
+        if let Ok(out) = std::process::Command::new("pacman").args(["-Qq"]).output() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                names.insert(line.trim().to_lowercase().to_string());
             }
         }
+    }
+    if mgrs.contains(&"snap".to_string()) {
+        if let Ok(out) = std::process::Command::new("snap").args(["list"]).output() {
+            for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
+                if let Some(name) = line.split_whitespace().next() {
+                    names.insert(name.to_lowercase().to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+/// Build (or rebuild) the explore catalog by querying all available package managers.
+/// Automatically detects which managers are installed — works on any distro.
+/// Streams progress to the GUI via pkgd-log events, then saves to explore_cache.json.
+#[tauri::command]
+async fn build_explore_catalog(window: tauri::Window) -> Vec<ExploreEntry> {
+    let mut entries: Vec<ExploreEntry> = Vec::new();
+    let mgrs = detect_pkg_managers();
+
+    let installed_names = build_installed_names(&mgrs);
+
+    // ── apt (Debian / Ubuntu / Mint / Pop!_OS etc.) ────────────────────────
+    if mgrs.contains(&"apt".to_string()) {
+        let _ = window.emit("pkgd-log", ":: scanning apt (reading sections)...");
+        let mut apt_count = 0usize;
+
+        // apt-cache dumpavail gives full stanza per package including Section:
+        if let Ok(out) = std::process::Command::new("apt-cache")
+            .arg("dumpavail")
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let mut cur_name: Option<String>    = None;
+            let mut cur_section: Option<String> = None;
+            let mut cur_desc: Option<String>    = None;
+
+            let flush = |name: Option<String>, section: Option<String>, desc: Option<String>,
+                          entries: &mut Vec<ExploreEntry>, installed_names: &std::collections::HashSet<String>, count: &mut usize| {
+                if let Some(n) = name {
+                    if !apt_is_noise(&n) {
+                        let cat = map_apt_section(section.as_deref().unwrap_or("misc"));
+                        let installed = installed_names.contains(&n.to_lowercase());
+                        entries.push(ExploreEntry {
+                            name: n,
+                            description: desc.unwrap_or_default(),
+                            manager: "apt".to_string(),
+                            category: cat.to_string(),
+                            installed,
+                        });
+                        *count += 1;
+                    }
+                }
+            };
+
+            for line in stdout.lines() {
+                if let Some(val) = line.strip_prefix("Package: ") {
+                    flush(cur_name.take(), cur_section.take(), cur_desc.take(),
+                          &mut entries, &installed_names, &mut apt_count);
+                    cur_name    = Some(val.trim().to_string());
+                    cur_section = None;
+                    cur_desc    = None;
+                } else if let Some(val) = line.strip_prefix("Section: ") {
+                    cur_section = Some(val.trim().to_string());
+                } else if let Some(val) = line.strip_prefix("Description: ") {
+                    if cur_desc.is_none() {
+                        cur_desc = Some(val.trim().to_string());
+                    }
+                } else if line.trim().is_empty() {
+                    // blank line = end of stanza
+                    flush(cur_name.take(), cur_section.take(), cur_desc.take(),
+                          &mut entries, &installed_names, &mut apt_count);
+                }
+            }
+            // flush last stanza
+            flush(cur_name, cur_section, cur_desc, &mut entries, &installed_names, &mut apt_count);
+        }
+
         let _ = window.emit("pkgd-log", format!("   apt: {} packages", apt_count));
     }
 
-    // flatpak remote-ls (user remotes first, then system)
-    let fp_start = entries.len();
-    for scope in &["--user", "--system"] {
-        if let Ok(out) = std::process::Command::new("flatpak")
-            .args(["remote-ls", scope, "--columns=name,description"])
+    // ── pacman (Arch / Manjaro / EndeavourOS etc.) ──────────────────────────
+    if mgrs.contains(&"pacman".to_string()) {
+        let _ = window.emit("pkgd-log", ":: scanning pacman...");
+        let pac_start = entries.len();
+
+        // pacman -Ss "" lists all packages: "<repo>/<name> <ver>\n    <desc>"
+        if let Ok(out) = std::process::Command::new("pacman")
+            .args(["-Ss", ""])
             .output()
         {
-            if !out.status.success() { continue; }
             let stdout = String::from_utf8_lossy(&out.stdout);
-            for line in stdout.lines() {
-                if line.trim().is_empty() { continue; }
-                let parts: Vec<&str> = line.splitn(2, '\t').collect();
-                let name = parts[0].trim();
-                if name.is_empty() { continue; }
-                // skip duplicates
-                if entries.iter().any(|e| e.manager == "flatpak" && e.name == name) { continue; }
-                let desc = parts.get(1).unwrap_or(&"").trim();
+            let mut lines_iter = stdout.lines().peekable();
+            while let Some(header) = lines_iter.next() {
+                // header: "core/bash 5.2.015-1 [installed]"
+                if header.starts_with(' ') || header.is_empty() { continue; }
+                let desc_line = lines_iter.next().unwrap_or("").trim().to_string();
+                let installed = header.contains("[installed]");
+                // parse repo/name
+                if let Some((repo_name, _rest)) = header.split_once(' ') {
+                    let name = repo_name.split('/').last().unwrap_or(repo_name);
+                    let repo = repo_name.split('/').next().unwrap_or("extra");
+                    if apt_is_noise(name) { continue; }
+                    let category = match repo {
+                        "core"     => "System",
+                        "extra"    => "Tools",
+                        "multilib" => "Tools",
+                        _          => "Other",
+                    };
+                    entries.push(ExploreEntry {
+                        name: name.to_string(),
+                        description: desc_line,
+                        manager: "pacman".to_string(),
+                        category: category.to_string(),
+                        installed,
+                    });
+                }
+            }
+        }
+        let pac_count = entries.len() - pac_start;
+        if pac_count > 0 {
+            let _ = window.emit("pkgd-log", format!("   pacman: {} packages", pac_count));
+        }
+    }
+
+    // ── dnf / rpm (Fedora / RHEL / openSUSE etc.) ──────────────────────────
+    if mgrs.contains(&"dnf".to_string()) {
+        let _ = window.emit("pkgd-log", ":: scanning dnf...");
+        let dnf_start = entries.len();
+
+        // dnf repoquery --qf with name/group/summary
+        if let Ok(out) = std::process::Command::new("dnf")
+            .args(["repoquery", "--qf", "%{name}\t%{group}\t%{summary}",
+                   "--available", "--quiet"])
+            .output()
+        {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let parts: Vec<&str> = line.splitn(3, '\t').collect();
+                let name = parts.first().map(|s| s.trim()).unwrap_or("").to_string();
+                if name.is_empty() || apt_is_noise(&name) { continue; }
+                let group = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                let desc  = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+                // map rpm group → category
+                let cat = if group.to_lowercase().contains("game") { "Games" }
+                    else if group.to_lowercase().contains("graphic") || group.to_lowercase().contains("image") { "Graphics" }
+                    else if group.to_lowercase().contains("internet") || group.to_lowercase().contains("network") { "Internet" }
+                    else if group.to_lowercase().contains("sound") || group.to_lowercase().contains("video") || group.to_lowercase().contains("multimedia") { "Multimedia" }
+                    else if group.to_lowercase().contains("system") || group.to_lowercase().contains("admin") { "System" }
+                    else if group.to_lowercase().contains("develop") { "Development" }
+                    else if group.to_lowercase().contains("editor") || group.to_lowercase().contains("text") { "Editors" }
+                    else { "Tools" };
                 let installed = installed_names.contains(&name.to_lowercase());
                 entries.push(ExploreEntry {
-                    name: name.to_string(),
-                    description: desc.to_string(),
-                    manager: "flatpak".to_string(),
-                    category: "flatpak".to_string(),
+                    name, description: desc,
+                    manager: "dnf".to_string(),
+                    category: cat.to_string(),
                     installed,
                 });
             }
         }
-    }
-    if entries.len() > fp_start {
-        let _ = window.emit("pkgd-log", format!("   flatpak: {} packages", entries.len() - fp_start));
+        let dnf_count = entries.len() - dnf_start;
+        if dnf_count > 0 {
+            let _ = window.emit("pkgd-log", format!("   dnf: {} packages", dnf_count));
+        }
     }
 
-    // Save cache with current unix timestamp
+    // ── flatpak ─────────────────────────────────────────────────────────────
+    if mgrs.contains(&"flatpak".to_string()) {
+        let _ = window.emit("pkgd-log", ":: scanning flatpak...");
+        let fp_start = entries.len();
+
+        for scope in &["--user", "--system"] {
+            if let Ok(out) = std::process::Command::new("flatpak")
+                .args(["remote-ls", scope, "--columns=name,description,application"])
+                .output()
+            {
+                if !out.status.success() { continue; }
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                for line in stdout.lines() {
+                    if line.trim().is_empty() { continue; }
+                    let parts: Vec<&str> = line.splitn(3, '\t').collect();
+                    let name = parts.first().map(|s| s.trim()).unwrap_or("").to_string();
+                    if name.is_empty() { continue; }
+                    if entries.iter().any(|e| e.manager == "flatpak" && e.name == name) { continue; }
+                    let desc    = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                    let app_id  = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+                    // rough category from app-id reverse domain (org.kde.*, io.github.*, etc.)
+                    let cat = if app_id.contains(".game") || app_id.to_lowercase().contains("game") { "Games" }
+                        else if app_id.contains("Graphics") || app_id.to_lowercase().contains("inkscape")
+                            || app_id.to_lowercase().contains("gimp") || app_id.to_lowercase().contains("krita") { "Graphics" }
+                        else if app_id.to_lowercase().contains("browser") || app_id.to_lowercase().contains("firefox") { "Internet" }
+                        else { "Other" };
+                    let installed = installed_names.contains(&name.to_lowercase())
+                        || installed_names.contains(&app_id.to_lowercase());
+                    entries.push(ExploreEntry {
+                        name, description: desc,
+                        manager: "flatpak".to_string(),
+                        category: cat.to_string(),
+                        installed,
+                    });
+                }
+            }
+        }
+        let fp_count = entries.len() - fp_start;
+        if fp_count > 0 {
+            let _ = window.emit("pkgd-log", format!("   flatpak: {} packages", fp_count));
+        }
+    }
+
+    // ── save cache ──────────────────────────────────────────────────────────
     let cached_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1180,7 +1359,8 @@ async fn build_explore_catalog(window: tauri::Window) -> Vec<ExploreEntry> {
         let _ = std::fs::write(explore_cache_path(), data);
     }
 
-    let _ = window.emit("pkgd-log", format!(":: explore catalog ready — {} packages indexed", entries.len()));
+    let total = entries.len();
+    let _ = window.emit("pkgd-log", format!(":: explore catalog ready — {} packages indexed", total));
     let _ = window.emit("pkgd-done", "ok");
     entries
 }
